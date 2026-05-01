@@ -10,7 +10,7 @@
 - [ ] Task 1.3: Create settings management module to handle saving/loading credentials securely.
   - **File Path**: `server/services/settings.js`
   - **Verification Step**: Run a temporary test script to save mock settings and verify `settings.json` is created with the expected content.
-- [ ] Task 1.4: Implement authentication endpoints (login to get a session/token).
+- [ ] Task 1.4: Implement authentication endpoints (login to get a session/token). Users are **admin-defined** in `settings.json` — no self-registration endpoint exists.
   - **File Path**: `server/routes/auth.js`
   - **Verification Step**: Use `curl` to send a POST request with the correct password and verify it returns a success token.
 

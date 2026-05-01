@@ -1,0 +1,19 @@
+{
+  "name": "yt2gd",
+  "version": "1.0.0",
+  "description": "Download a file from a URL and upload it to Google Drive.",
+  "type": "module",
+  "scripts": {
+    "dev": "node server/index.js",
+    "build:client": "cd client && npm run build",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "googleapis": "^140.0.0"
+  }
+}
