@@ -28,6 +28,7 @@ export const api = {
   getSettings: () => request('GET', '/auth/settings'),
   saveSettings: (data) => request('POST', '/auth/settings', data),
   transfer: (url, format, quality) => request('POST', '/transfer', { url, format, quality }),
+  cancelTransfer: () => request('POST', '/transfer/cancel'),
   getInfo: () => request('GET', '/auth/info'),
   getCookiesStatus: () => request('GET', '/auth/cookies/status'),
   deleteCookies: () => request('DELETE', '/auth/cookies'),

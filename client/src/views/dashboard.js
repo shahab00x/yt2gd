@@ -132,13 +132,16 @@ export async function renderDashboard(username, onNavigate) {
 
           <!-- Progress section -->
           <div id="progress-section" style="display:none; margin-top: 24px;">
-            <div class="progress-wrap">
-              <div class="progress-bar-bg">
-                <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
-              </div>
-              <div class="progress-label">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <div class="progress-label" style="margin-top: 0; display: inline-flex; align-items: center; gap: 10px;">
                 <span id="progress-step">Connecting…</span>
                 <span id="progress-detail" style="font-size:0.8rem; color:var(--text-secondary);"></span>
+              </div>
+              <button id="cancel-btn" class="btn btn-ghost" style="padding: 4px 10px; font-size: 0.75rem; color: var(--error); border-color: var(--error-bg);">Stop</button>
+            </div>
+            <div class="progress-wrap" style="margin-top: 0;">
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
               </div>
             </div>
           </div>
@@ -177,11 +180,25 @@ export async function renderDashboard(username, onNavigate) {
 
   // Transfer
   const transferBtn = document.getElementById('transfer-btn');
+  const cancelBtn = document.getElementById('cancel-btn');
   const progressSection = document.getElementById('progress-section');
   const progressFill = document.getElementById('progress-fill');
   const progressStep = document.getElementById('progress-step');
   const progressDetail = document.getElementById('progress-detail');
   const resultBox = document.getElementById('transfer-result');
+
+  let activeTransfer = false;
+
+  cancelBtn.addEventListener('click', async () => {
+    if (!activeTransfer) return;
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = 'Stopping…';
+    try {
+      await api.cancelTransfer();
+    } catch (err) {
+      console.error('Cancel failed:', err);
+    }
+  });
 
   transferBtn.addEventListener('click', async () => {
     const url = fileUrlInput.value.trim();
@@ -191,6 +208,7 @@ export async function renderDashboard(username, onNavigate) {
     const quality = document.getElementById('yt-quality')?.value || 'best';
 
     // Reset UI
+    activeTransfer = true;
     resultBox.style.display = 'none';
     progressSection.style.display = 'block';
     progressFill.style.width = '5%';
@@ -198,6 +216,8 @@ export async function renderDashboard(username, onNavigate) {
     progressDetail.textContent = '';
     transferBtn.disabled = true;
     transferBtn.innerHTML = '<span class="spinner"></span>';
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = 'Stop';
 
     // Open SSE stream BEFORE posting the transfer request
     const evtSource = api.openProgressStream();
@@ -227,6 +247,7 @@ export async function renderDashboard(username, onNavigate) {
 
     evtSource.addEventListener('done', (e) => {
       transferComplete = true;
+      activeTransfer = false;
       evtSource.close();
       progressFill.style.width = '100%';
       progressStep.textContent = 'Complete!';
@@ -245,16 +266,21 @@ export async function renderDashboard(username, onNavigate) {
       ytOptions.style.display = 'none';
       transferBtn.disabled = false;
       transferBtn.textContent = 'Upload to Drive';
+      setTimeout(() => { progressSection.style.display = 'none'; }, 2000);
     });
 
     evtSource.addEventListener('error', (e) => {
       if (transferComplete) return;
+      activeTransfer = false;
       evtSource.close();
       let msg = 'Transfer failed.';
       try { msg = JSON.parse(e.data).message || msg; } catch {}
+      
+      const isCancelled = msg.toLowerCase().includes('cancel');
+      
       progressSection.style.display = 'none';
-      resultBox.className = 'alert alert-error';
-      resultBox.textContent = `❌ ${msg}`;
+      resultBox.className = isCancelled ? 'alert alert-error' : 'alert alert-error';
+      resultBox.innerHTML = isCancelled ? `🛑 ${msg}` : `❌ ${msg}`;
       resultBox.style.display = 'flex';
       transferBtn.disabled = false;
       transferBtn.textContent = 'Upload to Drive';
@@ -265,16 +291,21 @@ export async function renderDashboard(username, onNavigate) {
       await api.transfer(url, format, quality);
     } catch (err) {
       if (!transferComplete) {
+        activeTransfer = false;
         evtSource.close();
         progressSection.style.display = 'none';
+        
+        const isCancelled = err.message.toLowerCase().includes('cancel');
         resultBox.className = 'alert alert-error';
-        resultBox.textContent = `❌ ${err.message}`;
+        resultBox.innerHTML = isCancelled ? `🛑 ${err.message}` : `❌ ${err.message}`;
         resultBox.style.display = 'flex';
 
-        const history = loadHistory();
-        history.unshift({ fileName: url.split('/').pop().split('?')[0] || 'unknown', folder: 'yt2gd', time: new Date().toLocaleString(), success: false });
-        saveHistory(history);
-        document.getElementById('history-container').innerHTML = renderHistory(history);
+        if (!isCancelled) {
+          const history = loadHistory();
+          history.unshift({ fileName: url.split('/').pop().split('?')[0] || 'unknown', folder: 'yt2gd', time: new Date().toLocaleString(), success: false });
+          saveHistory(history);
+          document.getElementById('history-container').innerHTML = renderHistory(history);
+        }
         transferBtn.disabled = false;
         transferBtn.textContent = 'Upload to Drive';
       }

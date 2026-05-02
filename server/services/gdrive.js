@@ -74,9 +74,10 @@ export function getTodayFolderName() {
  * Upload a local file to Google Drive under yt2gd/Month_Day/.
  * @param {string} filePath - Absolute path to the local file.
  * @param {function} onProgress - Called with { uploaded, total, speed, percent }
+ * @param {AbortSignal} abortSignal - Optional signal to abort the upload.
  * @returns {Promise<object>} - Uploaded file metadata { id, name, webViewLink }.
  */
-export async function uploadToGDrive(filePath, onProgress = null) {
+export async function uploadToGDrive(filePath, onProgress = null, abortSignal = null) {
   const auth = getAuthClient();
   const drive = google.drive({ version: 'v3', auth });
 
@@ -105,17 +106,40 @@ export async function uploadToGDrive(filePath, onProgress = null) {
     }
   });
 
-  const body = createReadStream(filePath).pipe(prog);
+  const rawStream = createReadStream(filePath);
+  const body = rawStream.pipe(prog);
 
-  const res = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [dateFolderId]
-    },
-    media: { body },
-    fields: 'id, name, webViewLink'
-  });
+  // If aborted before we even start
+  if (abortSignal?.aborted) {
+    rawStream.destroy();
+    throw new Error('Upload was cancelled by user.');
+  }
 
-  console.log(`✅ Uploaded "${fileName}" → Drive ID: ${res.data.id}`);
-  return res.data;
+  // Handle abort during upload
+  const onAbort = () => {
+    console.log(`🛑 Google Drive upload cancelled for ${fileName}`);
+    rawStream.destroy();
+  };
+  if (abortSignal) abortSignal.addEventListener('abort', onAbort);
+
+  try {
+    const res = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: [dateFolderId]
+      },
+      media: { body },
+      fields: 'id, name, webViewLink'
+    }, {
+      signal: abortSignal // Pass the abort signal directly to googleapis
+    });
+
+    console.log(`✅ Uploaded "${fileName}" → Drive ID: ${res.data.id}`);
+    return res.data;
+  } catch (err) {
+    if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
+    throw err;
+  } finally {
+    if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+  }
 }

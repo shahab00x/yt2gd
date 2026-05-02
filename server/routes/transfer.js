@@ -1,14 +1,19 @@
 import { Router } from 'express';
 import { existsSync } from 'fs';
 import { unlink } from 'fs/promises';
-import { join } from 'path';
 import { requireAuth } from './auth.js';
-import { downloadFile, downloadYtDlp, isYouTubeUrl, TMP_DIR } from '../services/downloader.js';
+import { downloadYtDlp } from '../services/downloader.js';
 import { uploadToGDrive, getTodayFolderName } from '../services/gdrive.js';
 import { loadSettings } from '../services/settings.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Initialize a store for active abort controllers globally on the app
+router.use((req, res, next) => {
+  if (!req.app.locals.activeTransfers) req.app.locals.activeTransfers = {};
+  next();
+});
 
 /**
  * Helper: format bytes to a human-readable string.
@@ -51,10 +56,26 @@ router.get('/progress', (req, res) => {
 });
 
 /**
+ * POST /api/transfer/cancel
+ * Aborts the current active transfer for the session.
+ */
+router.post('/cancel', (req, res) => {
+  const sessionId = req.session.id;
+  const controller = req.app.locals.activeTransfers[sessionId];
+  
+  if (controller) {
+    controller.abort();
+    delete req.app.locals.activeTransfers[sessionId];
+    return res.json({ success: true, message: 'Transfer cancelled.' });
+  }
+  return res.json({ success: false, message: 'No active transfer to cancel.' });
+});
+
+/**
  * POST /api/transfer
  * Body: { url, format?, quality? }
- *   format  — 'video' | 'audio'  (only relevant for YouTube URLs)
- *   quality — 'best' | '1080' | '720' | '480' | '360'  (only relevant for YouTube URLs)
+ *   format  — 'video' | 'audio'
+ *   quality — 'best' | '1080' | '720' | '480' | '360' | 'worst'
  */
 router.post('/', async (req, res) => {
   const { url, format = 'video', quality = 'best' } = req.body;
@@ -64,6 +85,11 @@ router.post('/', async (req, res) => {
   }
 
   const sessionId = req.session.id;
+
+  // Initialize cancellation controller
+  const abortController = new AbortController();
+  req.app.locals.activeTransfers[sessionId] = abortController;
+  const signal = abortController.signal;
 
   /** Push a progress event to the SSE connection for this session */
   function sendSSE(event, data) {
@@ -76,36 +102,18 @@ router.post('/', async (req, res) => {
 
   let localPath = null;
   try {
-    const isYT = isYouTubeUrl(url);
-
     // --- Download phase ---
-    if (isYT) {
-      sendSSE('status', { phase: 'download', message: 'Starting yt-dlp…' });
+    sendSSE('status', { phase: 'download', message: 'Starting download…' });
 
-      // Resolve cookies path from settings
-      const settings = loadSettings();
-      const cookiesPath = settings.cookiesPath && existsSync(settings.cookiesPath)
-        ? settings.cookiesPath
-        : null;
+    // Resolve cookies path from settings
+    const settings = loadSettings();
+    const cookiesPath = settings.cookiesPath && existsSync(settings.cookiesPath)
+      ? settings.cookiesPath
+      : null;
 
-      localPath = await downloadYtDlp(url, format, quality, cookiesPath, (line) => {
-        sendSSE('progress', { phase: 'download', line });
-      });
-
-    } else {
-      sendSSE('status', { phase: 'download', message: 'Starting download…' });
-
-      localPath = await downloadFile(url, ({ downloaded, total, speed, percent }) => {
-        sendSSE('progress', {
-          phase: 'download',
-          downloaded,
-          total,
-          speed,
-          percent: Math.round(percent),
-          label: `Downloading ${fmtBytes(downloaded)} / ${fmtBytes(total)} · ${fmtSpeed(speed)}`,
-        });
-      });
-    }
+    localPath = await downloadYtDlp(url, format, quality, cookiesPath, (line) => {
+      sendSSE('progress', { phase: 'download', line });
+    }, signal);
 
     // --- Upload phase ---
     sendSSE('status', { phase: 'upload', message: 'Uploading to Google Drive…' });
@@ -119,7 +127,7 @@ router.post('/', async (req, res) => {
         percent: Math.round(percent),
         label: `Uploading ${fmtBytes(uploaded)} / ${fmtBytes(total)} · ${fmtSpeed(speed)}`,
       });
-    });
+    }, signal);
 
     // --- Cleanup ---
     await unlink(localPath);
@@ -133,11 +141,17 @@ router.post('/', async (req, res) => {
       webViewLink: fileInfo.webViewLink || null,
     };
 
+    // Remove from active transfers on success
+    delete req.app.locals.activeTransfers[sessionId];
+
     sendSSE('done', result);
     return res.json(result);
 
   } catch (err) {
-    console.error('Transfer failed:', err.message);
+    console.error('Transfer failed/cancelled:', err.message);
+
+    // Remove from active transfers on error/cancel
+    delete req.app.locals.activeTransfers[sessionId];
 
     if (localPath) {
       try { await unlink(localPath); } catch (_) {}
@@ -148,7 +162,7 @@ router.post('/', async (req, res) => {
     if (!res.headersSent) {
       return res.status(500).json({ error: err.message });
     }
-    return res.json({ success: false, error: err.message });
+    return res.end();
   }
 });
 
