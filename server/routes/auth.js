@@ -1,6 +1,22 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { loadSettings, updateGdriveSettings } from '../services/settings.js';
+import multer from 'multer';
+import { existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { createReadStream } from 'fs';
+import { readFile } from 'fs/promises';
+import { loadSettings, updateGdriveSettings, updateCookiesPath } from '../services/settings.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Cookies file upload — store directly in project root, gitignored
+const cookiesStorage = multer.diskStorage({
+  destination: join(__dirname, '../../'),
+  filename: (req, file, cb) => cb(null, 'cookies.txt'),
+});
+const uploadCookies = multer({ storage: cookiesStorage });
 
 const router = Router();
 
@@ -81,6 +97,52 @@ router.post('/settings', requireAuth, (req, res) => {
   });
 
   res.json({ success: true });
+});
+
+/**
+ * POST /api/auth/cookies
+ * Accepts a cookies.txt file upload and stores it in the project root.
+ */
+router.post('/cookies', requireAuth, uploadCookies.single('cookies'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
+  }
+  const cookiesPath = req.file.path;
+  updateCookiesPath(cookiesPath);
+  res.json({ success: true, message: 'cookies.txt saved.' });
+});
+
+/**
+ * DELETE /api/auth/cookies
+ * Removes the stored cookies.txt reference from settings.
+ */
+router.delete('/cookies', requireAuth, (req, res) => {
+  updateCookiesPath(null);
+  res.json({ success: true, message: 'Cookies removed.' });
+});
+
+/**
+ * GET /api/auth/cookies/status
+ * Returns whether a cookies.txt is currently saved.
+ */
+router.get('/cookies/status', requireAuth, (req, res) => {
+  const settings = loadSettings();
+  const hasCookies = !!(settings.cookiesPath && existsSync(settings.cookiesPath));
+  res.json({ hasCookies });
+});
+
+/**
+ * GET /api/info
+ * Returns server version from package.json.
+ */
+router.get('/info', async (req, res) => {
+  try {
+    const pkgPath = join(__dirname, '../../package.json');
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf-8'));
+    res.json({ version: pkg.version, name: pkg.name });
+  } catch {
+    res.json({ version: 'unknown' });
+  }
 });
 
 // Middleware: require authenticated session

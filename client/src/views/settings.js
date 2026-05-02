@@ -75,8 +75,27 @@ export function renderSettings(username, onNavigate) {
           </div>
         </div>
 
-        <!-- How to get credentials -->
+        <!-- yt-dlp Cookies Card -->
         <div class="card fade-up" style="animation-delay:0.1s;">
+          <div class="card-title">🍪 yt-dlp Cookies</div>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:16px;">
+            Upload a <code style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">cookies.txt</code>
+            file exported from your browser to allow yt-dlp to bypass age restrictions and bot checks on YouTube.
+          </p>
+
+          <div id="cookies-status-msg" style="margin-bottom:14px;"></div>
+
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <input id="cookies-file-input" type="file" accept=".txt" style="display:none;" />
+            <button id="cookies-upload-btn" class="btn btn-ghost">📂 Upload cookies.txt</button>
+            <button id="cookies-remove-btn" class="btn btn-ghost" style="color:var(--error); display:none;">🗑 Remove Cookies</button>
+          </div>
+
+          <div id="cookies-result" style="margin-top:12px; display:none;"></div>
+        </div>
+
+        <!-- How to get credentials -->
+        <div class="card fade-up" style="animation-delay:0.2s;">
           <div class="card-title">📖 How to Get Google Drive Credentials</div>
           <ol style="padding-left: 20px; line-height: 2; color: var(--text-secondary); font-size:0.9rem;">
             <li>Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent-light);">Google Cloud Console</a> and create a project.</li>
@@ -143,6 +162,69 @@ export function renderSettings(username, onNavigate) {
     } finally {
       btn.disabled = false;
       btn.textContent = 'Save Settings';
+    }
+  });
+
+  // --- Cookies section ---
+  const cookiesStatusMsg = document.getElementById('cookies-status-msg');
+  const cookiesResult = document.getElementById('cookies-result');
+  const cookiesRemoveBtn = document.getElementById('cookies-remove-btn');
+  const cookiesFileInput = document.getElementById('cookies-file-input');
+  const cookiesUploadBtn = document.getElementById('cookies-upload-btn');
+
+  function setCookiesStatus(hasCookies) {
+    if (hasCookies) {
+      cookiesStatusMsg.innerHTML = '<span class="badge badge-success">✅ cookies.txt is active</span>';
+      cookiesRemoveBtn.style.display = 'inline-flex';
+    } else {
+      cookiesStatusMsg.innerHTML = '<span class="badge" style="background:var(--bg-elevated);color:var(--text-secondary);">No cookies uploaded</span>';
+      cookiesRemoveBtn.style.display = 'none';
+    }
+  }
+
+  api.getCookiesStatus().then(s => setCookiesStatus(s.hasCookies)).catch(() => {});
+
+  cookiesUploadBtn.addEventListener('click', () => cookiesFileInput.click());
+
+  cookiesFileInput.addEventListener('change', async () => {
+    const file = cookiesFileInput.files[0];
+    if (!file) return;
+
+    cookiesUploadBtn.disabled = true;
+    cookiesUploadBtn.innerHTML = '<span class="spinner"></span>';
+    cookiesResult.style.display = 'none';
+
+    try {
+      await api.uploadCookies(file);
+      setCookiesStatus(true);
+      cookiesResult.className = 'alert alert-success';
+      cookiesResult.textContent = '✅ cookies.txt uploaded successfully.';
+      cookiesResult.style.display = 'flex';
+    } catch (err) {
+      cookiesResult.className = 'alert alert-error';
+      cookiesResult.textContent = '❌ ' + err.message;
+      cookiesResult.style.display = 'flex';
+    } finally {
+      cookiesUploadBtn.disabled = false;
+      cookiesUploadBtn.textContent = '📂 Upload cookies.txt';
+      cookiesFileInput.value = '';
+    }
+  });
+
+  cookiesRemoveBtn.addEventListener('click', async () => {
+    cookiesRemoveBtn.disabled = true;
+    try {
+      await api.deleteCookies();
+      setCookiesStatus(false);
+      cookiesResult.className = 'alert alert-success';
+      cookiesResult.textContent = '🗑 Cookies removed.';
+      cookiesResult.style.display = 'flex';
+    } catch (err) {
+      cookiesResult.className = 'alert alert-error';
+      cookiesResult.textContent = '❌ ' + err.message;
+      cookiesResult.style.display = 'flex';
+    } finally {
+      cookiesRemoveBtn.disabled = false;
     }
   });
 }

@@ -48,3 +48,12 @@ export function updateGdriveSettings(gdriveConfig) {
   settings.googleDrive = { ...settings.googleDrive, ...gdriveConfig };
   saveSettings(settings);
 }
+
+/**
+ * Update the path to the saved cookies.txt file.
+ */
+export function updateCookiesPath(cookiesPath) {
+  const settings = loadSettings();
+  settings.cookiesPath = cookiesPath;
+  saveSettings(settings);
+}

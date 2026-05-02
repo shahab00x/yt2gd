@@ -4,3 +4,5 @@ tmp/
 client/dist/
 *.log
 .env
+bin/
+cookies.txt

@@ -44,21 +44,32 @@
   - **File Path**: `server/index.js`
   - **Verification Step**: Run `npm run build` in client, start the Node server, and verify the frontend is served correctly at `http://localhost:3000`.
 
-## Phase 5: Speedup Improvements (Chunked Downloading)
-- [x] Task 5.1: Refactor `downloader.js` to implement concurrent HTTP Range requests for raw media streams.
+## Phase 5: Speedup Improvements & Large File Fix
+- [x] Task 5.1: Replace the custom chunking logic in `downloader.js` with a dedicated npm downloader library (e.g., `node-downloader-helper`) configured for multi-connection chunking to reliably handle 1GB+ files without memory exhaustion.
   - **File Path**: `server/services/downloader.js`
-  - **Verification Step**: Run a test script passing a direct `googlevideo.com` URL and verify it downloads significantly faster using concurrent chunks.
+  - **Verification Step**: Run a test script with a 1GB+ URL and verify all chunks complete and the file merges to the exact total size.
+- [x] Task 5.2: Implement download and upload progress tracking (bytes, speed, total) using Server-Sent Events (SSE) or polling.
+  - **File Path**: `server/routes/transfer.js`, `server/services/downloader.js`, `server/services/gdrive.js`
+  - **Verification Step**: Call the progress endpoint during a transfer and verify real-time stats are emitted.
 
-## Phase 6: yt-dlp Integration & UI Additions
-- [ ] Task 6.1: Install `youtube-dl-exec` and ensure the `yt-dlp` binary is available.
-  - **File Path**: `package.json`
-  - **Verification Step**: Run `npm list` to verify installation and test executing the wrapper.
-- [ ] Task 6.2: Create API endpoints and logic to support YouTube URLs, handling format selection and cookie passing.
+## Phase 6: yt-dlp Integration & Binary Management
+- [x] Task 6.1: Create an OS-independent auto-downloader script for `yt-dlp` binary and add the executable to `.gitignore`.
+  - **File Path**: `scripts/download-yt-dlp.js`, `package.json` (postinstall), `.gitignore`
+  - **Verification Step**: Run `npm run postinstall` on Windows and verify `yt-dlp.exe` is downloaded correctly without errors.
+- [x] Task 6.2: Create API endpoints and logic to support YouTube URLs via `yt-dlp`, handling format selection and cookie passing.
   - **File Path**: `server/routes/transfer.js` and `server/services/downloader.js`
   - **Verification Step**: Use `curl` to pass a standard YouTube URL with format parameters and verify it triggers `yt-dlp` successfully.
-- [ ] Task 6.3: Implement the UI feature for users to upload and manage their `cookies.txt` file.
-  - **File Path**: `client/src/settings.js` and `server/routes/settings.js`
+- [x] Task 6.3: Implement the UI feature for users to upload and manage their `cookies.txt` file.
+  - **File Path**: `client/src/settings.js` and `server/routes/auth.js`
   - **Verification Step**: Upload a mock `cookies.txt` file via the frontend and verify it is securely saved on the backend.
-- [ ] Task 6.4: Update the main UI dashboard to show format (Video/Audio) and quality selection when a YouTube URL is entered.
-  - **File Path**: `client/src/dashboard.js`
-  - **Verification Step**: Enter a YouTube URL in the UI, select format/quality options, submit, and verify the successful transfer.
+
+## Phase 7: UI Enhancements (Progress & Versions)
+- [x] Task 7.1: Update the main UI dashboard to show real-time download/upload progress (bytes, total, speed).
+  - **File Path**: `client/src/views/dashboard.js`, `client/src/api.js`
+  - **Verification Step**: Submit a transfer from the UI and observe the progress bar updating with accurate stats.
+- [x] Task 7.2: Add format (Video/Audio) and quality selection when a YouTube URL is entered in the UI.
+  - **File Path**: `client/src/views/dashboard.js`
+  - **Verification Step**: Enter a YouTube URL, select options, and verify the correct parameters are sent to the backend.
+- [x] Task 7.3: Display the application version (server and client) in the UI footer or sidebar.
+  - **File Path**: `client/src/views/dashboard.js`, `client/vite.config.js`, `server/routes/auth.js`
+  - **Verification Step**: Open the UI and verify the versions match the `package.json`.

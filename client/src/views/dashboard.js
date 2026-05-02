@@ -5,14 +5,14 @@ const HISTORY_KEY = 'yt2gd_history';
 function loadHistory() {
   try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
 }
-
 function saveHistory(h) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0, 50)));
 }
 
 function getFileIcon(name = '') {
   const ext = name.split('.').pop().toLowerCase();
-  const map = { mp4: '🎬', mkv: '🎬', avi: '🎬', mov: '🎬', mp3: '🎵', wav: '🎵',
+  const map = { mp4: '🎬', mkv: '🎬', avi: '🎬', mov: '🎬', webm: '🎬',
+    mp3: '🎵', wav: '🎵', aac: '🎵', ogg: '🎵', m4a: '🎵',
     pdf: '📄', zip: '🗜', rar: '🗜', jpg: '🖼', jpeg: '🖼', png: '🖼', gif: '🖼',
     exe: '⚙️', msi: '⚙️', dmg: '💿' };
   return map[ext] || '📁';
@@ -37,9 +37,26 @@ function renderHistory(list) {
   </div>`;
 }
 
-export function renderDashboard(username, onNavigate) {
+function isYouTubeUrl(url) {
+  try {
+    const { hostname } = new URL(url);
+    return hostname.includes('youtube.com') || hostname.includes('youtu.be');
+  } catch { return false; }
+}
+
+export async function renderDashboard(username, onNavigate) {
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
   const app = document.getElementById('app');
+
+  // Fetch server version
+  let serverVersion = '…';
+  try {
+    const info = await api.getInfo();
+    serverVersion = info.version || 'unknown';
+  } catch { serverVersion = 'unavailable'; }
+
+  // Client version from Vite env (set in vite.config.js)
+  const clientVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
   app.innerHTML = `
     <div class="app-layout">
@@ -58,6 +75,10 @@ export function renderDashboard(username, onNavigate) {
           </button>
         </nav>
         <div class="sidebar-footer">
+          <div class="version-info">
+            <span>Server&nbsp;<code>v${serverVersion}</code></span>
+            <span>Client&nbsp;<code>v${clientVersion}</code></span>
+          </div>
           <button id="logout-btn" class="nav-item" style="color: var(--error);">
             <span class="nav-icon">🚪</span> Sign Out
           </button>
@@ -76,21 +97,48 @@ export function renderDashboard(username, onNavigate) {
           <div class="card-title">🔗 File URL</div>
           <div class="url-input-wrap">
             <input id="file-url" class="form-control" type="url"
-              placeholder="https://example.com/path/to/file.mp4" />
+              placeholder="https://youtube.com/watch?v=… or a direct file URL" />
             <button id="transfer-btn" class="btn btn-primary" style="white-space:nowrap;">
               Upload to Drive
             </button>
           </div>
-          <p class="hint" id="url-hint">Paste a direct link to any publicly accessible file.</p>
 
+          <!-- YouTube options (hidden until YouTube URL is detected) -->
+          <div id="yt-options" style="display:none; margin-top:16px; display:none;">
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+              <div class="form-group" style="margin:0; flex:1; min-width:140px;">
+                <label for="yt-format" style="font-size:0.82rem;">Format</label>
+                <select id="yt-format" class="form-control" style="padding:8px 10px;">
+                  <option value="video">🎬 Video</option>
+                  <option value="audio">🎵 Audio only</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; flex:1; min-width:140px;">
+                <label for="yt-quality" style="font-size:0.82rem;">Quality</label>
+                <select id="yt-quality" class="form-control" style="padding:8px 10px;">
+                  <option value="best">Best available</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                  <option value="360">360p</option>
+                  <option value="worst">Lowest</option>
+                </select>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:8px;">🍪 Cookies will be used automatically if uploaded in Settings.</p>
+          </div>
+
+          <p class="hint" id="url-hint" style="margin-top:8px;">Paste a YouTube link or a direct file URL.</p>
+
+          <!-- Progress section -->
           <div id="progress-section" style="display:none; margin-top: 24px;">
             <div class="progress-wrap">
               <div class="progress-bar-bg">
-                <div class="progress-bar-fill" id="progress-fill" style="width: 50%;"></div>
+                <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
               </div>
               <div class="progress-label">
-                <span id="progress-step">Downloading…</span>
-                <span id="progress-pct"></span>
+                <span id="progress-step">Connecting…</span>
+                <span id="progress-detail" style="font-size:0.8rem; color:var(--text-secondary);"></span>
               </div>
             </div>
           </div>
@@ -114,87 +162,126 @@ export function renderDashboard(username, onNavigate) {
     onNavigate('logout');
   });
 
+  // Show/hide YouTube options based on URL input
+  const fileUrlInput = document.getElementById('file-url');
+  const ytOptions = document.getElementById('yt-options');
+
+  fileUrlInput.addEventListener('input', () => {
+    const url = fileUrlInput.value.trim();
+    if (isYouTubeUrl(url)) {
+      ytOptions.style.display = 'block';
+    } else {
+      ytOptions.style.display = 'none';
+    }
+  });
+
   // Transfer
   const transferBtn = document.getElementById('transfer-btn');
-  const fileUrlInput = document.getElementById('file-url');
   const progressSection = document.getElementById('progress-section');
   const progressFill = document.getElementById('progress-fill');
   const progressStep = document.getElementById('progress-step');
+  const progressDetail = document.getElementById('progress-detail');
   const resultBox = document.getElementById('transfer-result');
 
   transferBtn.addEventListener('click', async () => {
     const url = fileUrlInput.value.trim();
-    if (!url) {
-      fileUrlInput.focus();
-      return;
-    }
+    if (!url) { fileUrlInput.focus(); return; }
+
+    const format = document.getElementById('yt-format')?.value || 'video';
+    const quality = document.getElementById('yt-quality')?.value || 'best';
 
     // Reset UI
     resultBox.style.display = 'none';
     progressSection.style.display = 'block';
-    progressFill.style.width = '20%';
-    progressStep.textContent = 'Downloading…';
+    progressFill.style.width = '5%';
+    progressStep.textContent = 'Connecting…';
+    progressDetail.textContent = '';
     transferBtn.disabled = true;
     transferBtn.innerHTML = '<span class="spinner"></span>';
 
-    // Animate progress bar (indeterminate)
-    let pct = 20;
-    const ticker = setInterval(() => {
-      pct = Math.min(pct + Math.random() * 5, 85);
-      progressFill.style.width = pct + '%';
-    }, 600);
+    // Open SSE stream BEFORE posting the transfer request
+    const evtSource = api.openProgressStream();
+    let transferComplete = false;
 
-    try {
-      progressStep.textContent = 'Downloading & uploading…';
-      const data = await api.transfer(url);
+    evtSource.addEventListener('status', (e) => {
+      const data = JSON.parse(e.data);
+      if (data.phase === 'download') {
+        progressStep.textContent = 'Downloading…';
+        progressFill.style.width = '10%';
+      } else if (data.phase === 'upload') {
+        progressStep.textContent = 'Uploading to Drive…';
+        progressFill.style.width = '55%';
+      }
+    });
 
-      clearInterval(ticker);
+    evtSource.addEventListener('progress', (e) => {
+      const data = JSON.parse(e.data);
+      if (data.phase === 'download') {
+        if (data.percent) progressFill.style.width = `${Math.min(data.percent * 0.5, 50)}%`;
+        progressDetail.textContent = data.label || (data.line ? data.line.substring(0, 80) : '');
+      } else if (data.phase === 'upload') {
+        if (data.percent) progressFill.style.width = `${50 + Math.min(data.percent * 0.45, 45)}%`;
+        progressDetail.textContent = data.label || '';
+      }
+    });
+
+    evtSource.addEventListener('done', (e) => {
+      transferComplete = true;
+      evtSource.close();
       progressFill.style.width = '100%';
       progressStep.textContent = 'Complete!';
+      progressDetail.textContent = '';
 
+      const data = JSON.parse(e.data);
       resultBox.className = 'alert alert-success';
       resultBox.innerHTML = `✅ <span><strong>${data.fileName}</strong> uploaded to <em>${data.folder}</em>${data.webViewLink ? ` &nbsp;<a href="${data.webViewLink}" target="_blank" style="color:var(--success);">View on Drive ↗</a>` : ''}</span>`;
       resultBox.style.display = 'flex';
 
-      // Save to history
       const history = loadHistory();
-      history.unshift({
-        fileName: data.fileName,
-        folder: data.folder,
-        webViewLink: data.webViewLink,
-        time: new Date().toLocaleString(),
-        success: true
-      });
+      history.unshift({ fileName: data.fileName, folder: data.folder, webViewLink: data.webViewLink, time: new Date().toLocaleString(), success: true });
       saveHistory(history);
       document.getElementById('history-container').innerHTML = renderHistory(history);
-
       fileUrlInput.value = '';
-
-    } catch (err) {
-      clearInterval(ticker);
-      progressSection.style.display = 'none';
-
-      resultBox.className = 'alert alert-error';
-      resultBox.textContent = `❌ ${err.message}`;
-      resultBox.style.display = 'flex';
-
-      // Save failed item to history
-      const history = loadHistory();
-      history.unshift({
-        fileName: url.split('/').pop().split('?')[0] || 'unknown',
-        folder: 'yt2gd',
-        time: new Date().toLocaleString(),
-        success: false
-      });
-      saveHistory(history);
-      document.getElementById('history-container').innerHTML = renderHistory(history);
-    } finally {
+      ytOptions.style.display = 'none';
       transferBtn.disabled = false;
       transferBtn.textContent = 'Upload to Drive';
+    });
+
+    evtSource.addEventListener('error', (e) => {
+      if (transferComplete) return;
+      evtSource.close();
+      let msg = 'Transfer failed.';
+      try { msg = JSON.parse(e.data).message || msg; } catch {}
+      progressSection.style.display = 'none';
+      resultBox.className = 'alert alert-error';
+      resultBox.textContent = `❌ ${msg}`;
+      resultBox.style.display = 'flex';
+      transferBtn.disabled = false;
+      transferBtn.textContent = 'Upload to Drive';
+    });
+
+    // Now fire the actual request (non-blocking — progress comes through SSE)
+    try {
+      await api.transfer(url, format, quality);
+    } catch (err) {
+      if (!transferComplete) {
+        evtSource.close();
+        progressSection.style.display = 'none';
+        resultBox.className = 'alert alert-error';
+        resultBox.textContent = `❌ ${err.message}`;
+        resultBox.style.display = 'flex';
+
+        const history = loadHistory();
+        history.unshift({ fileName: url.split('/').pop().split('?')[0] || 'unknown', folder: 'yt2gd', time: new Date().toLocaleString(), success: false });
+        saveHistory(history);
+        document.getElementById('history-container').innerHTML = renderHistory(history);
+        transferBtn.disabled = false;
+        transferBtn.textContent = 'Upload to Drive';
+      }
     }
   });
 
-  // Allow Enter key in URL input
+  // Allow Enter key
   fileUrlInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') transferBtn.click();
   });

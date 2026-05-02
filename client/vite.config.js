@@ -1,9 +1,16 @@
 import { defineConfig } from 'vite';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
 
 export default defineConfig({
   root: '.',
   build: {
     outDir: 'dist'
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
   server: {
     port: 5173,
@@ -11,7 +18,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: false
+        secure: false,
       }
     }
   }

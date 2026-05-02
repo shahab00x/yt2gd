@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { createReadStream, statSync } from 'fs';
 import { basename } from 'path';
 import { loadSettings } from './settings.js';
+import progressStream from 'progress-stream';
 
 /**
  * Create an authorized Google Drive OAuth2 client from stored settings.
@@ -72,9 +73,10 @@ export function getTodayFolderName() {
 /**
  * Upload a local file to Google Drive under yt2gd/Month_Day/.
  * @param {string} filePath - Absolute path to the local file.
+ * @param {function} onProgress - Called with { uploaded, total, speed, percent }
  * @returns {Promise<object>} - Uploaded file metadata { id, name, webViewLink }.
  */
-export async function uploadToGDrive(filePath) {
+export async function uploadToGDrive(filePath, onProgress = null) {
   const auth = getAuthClient();
   const drive = google.drive({ version: 'v3', auth });
 
@@ -90,14 +92,27 @@ export async function uploadToGDrive(filePath) {
 
   console.log(`⬆️  Uploading "${fileName}" (${(fileSize / 1024 / 1024).toFixed(2)} MB)...`);
 
+  // Wrap the read stream with progress tracking
+  const prog = progressStream({ length: fileSize, time: 500 });
+  prog.on('progress', (data) => {
+    if (onProgress) {
+      onProgress({
+        uploaded: data.transferred,
+        total: data.length,
+        speed: data.speed,
+        percent: data.percentage,
+      });
+    }
+  });
+
+  const body = createReadStream(filePath).pipe(prog);
+
   const res = await drive.files.create({
     requestBody: {
       name: fileName,
       parents: [dateFolderId]
     },
-    media: {
-      body: createReadStream(filePath)
-    },
+    media: { body },
     fields: 'id, name, webViewLink'
   });
 

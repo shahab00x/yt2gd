@@ -1,141 +1,146 @@
-import axios from 'axios';
-import { createWriteStream, mkdirSync, existsSync, promises as fsPromises } from 'fs';
+import { DownloaderHelper } from 'node-downloader-helper';
+import { existsSync, mkdirSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join, basename } from 'path';
-import { pipeline } from 'stream/promises';
+import { dirname, join } from 'path';
+import youtubedl from 'youtube-dl-exec';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const TMP_DIR = join(__dirname, '../../tmp');
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
-const MAX_CONCURRENT = 5; // Download 5 chunks at a time
+export const TMP_DIR = join(__dirname, '../../tmp');
 
-// Helper to limit concurrency
-async function asyncPool(poolLimit, array, iteratorFn) {
-  const ret = [];
-  const executing = [];
-  for (const item of array) {
-    const p = Promise.resolve().then(() => iteratorFn(item, array));
-    ret.push(p);
-    if (poolLimit <= array.length) {
-      const e = p.then(() => executing.splice(executing.indexOf(e), 1));
-      executing.push(e);
-      if (executing.length >= poolLimit) {
-        await Promise.race(executing);
-      }
-    }
-  }
-  return Promise.all(ret);
+function ensureTmpDir() {
+  if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
 }
 
 /**
- * Download a file from a URL, save it to /tmp, return the local path.
- * Supports chunked downloading for speed improvements.
- * @param {string} url - The URL of the file to download.
- * @returns {Promise<string>} - Absolute path of the saved file.
+ * Detect if a URL is a standard YouTube watch page.
  */
-export async function downloadFile(url) {
-  if (!existsSync(TMP_DIR)) {
-    mkdirSync(TMP_DIR, { recursive: true });
-  }
-
-  // Extract filename
-  let filename;
+export function isYouTubeUrl(url) {
   try {
-    const urlObj = new URL(url);
-    filename = basename(urlObj.pathname) || `download_${Date.now()}`;
-    filename = filename.split('?')[0];
+    const { hostname } = new URL(url);
+    return hostname.includes('youtube.com') || hostname.includes('youtu.be');
   } catch {
-    filename = `download_${Date.now()}`;
+    return false;
+  }
+}
+
+/**
+ * Download a direct media file (e.g. googlevideo.com) using node-downloader-helper.
+ * Emits progress via the onProgress callback.
+ *
+ * @param {string} url - Direct file URL
+ * @param {function} onProgress - Called with { downloaded, total, speed, percent }
+ * @returns {Promise<string>} - Absolute path to the downloaded file
+ */
+export function downloadFile(url, onProgress = null) {
+  ensureTmpDir();
+
+  return new Promise((resolve, reject) => {
+    const dl = new DownloaderHelper(url, TMP_DIR, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+      },
+      retry: { maxRetries: 3, delay: 1000 },
+      resumeIfFileExists: false,
+      override: true,
+    });
+
+    dl.on('progress', (stats) => {
+      if (onProgress) {
+        onProgress({
+          downloaded: stats.downloadedSize,
+          total: stats.totalSize,
+          speed: stats.speed,
+          percent: stats.progress,
+        });
+      }
+    });
+
+    dl.on('end', (info) => {
+      console.log(`✅ Downloaded: ${info.fileName}`);
+      resolve(info.filePath);
+    });
+
+    dl.on('error', (err) => {
+      reject(new Error(`Download failed: ${err.message}`));
+    });
+
+    dl.start().catch(reject);
+  });
+}
+
+/**
+ * Download a YouTube URL using yt-dlp.
+ * Emits raw yt-dlp stdout lines as progress via onProgress callback.
+ *
+ * @param {string} url - YouTube URL
+ * @param {string} format - 'video' or 'audio'
+ * @param {string} quality - 'best', 'worst', '1080', '720', '480', '360'
+ * @param {string|null} cookiesPath - Path to a cookies.txt file (optional)
+ * @param {function} onProgress - Called with a raw log line string
+ * @returns {Promise<string>} - Absolute path to the downloaded file
+ */
+export async function downloadYtDlp(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null) {
+  ensureTmpDir();
+
+  const baseName = `ytdlp_${Date.now()}`;
+  const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
+
+  let formatStr;
+  if (format === 'audio') {
+    formatStr = 'bestaudio/best';
+  } else if (quality === 'best' || quality === 'worst') {
+    formatStr = quality === 'best' ? 'bestvideo+bestaudio/best' : 'worstvideo+worstaudio/worst';
+  } else {
+    // e.g., '1080', '720'
+    formatStr = `bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]`;
   }
 
-  if (!filename || filename === '/') {
-    filename = `download_${Date.now()}`;
-  }
+  // Find the yt-dlp binary path (may be placed by our postinstall script)
+  const binDir = join(__dirname, '../../bin');
+  const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  const localBin = join(binDir, binName);
 
-  const standardHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Connection': 'keep-alive'
+  const options = {
+    output: outputTemplate,
+    format: formatStr,
+    noWarnings: true,
+    newline: true,
+    progress: true,
   };
 
-  // 1. HEAD request to check size and range support
-  let contentLength = null;
-  let supportsRange = false;
-  try {
-    const headRes = await axios.head(url, { headers: standardHeaders, timeout: 10000 });
-    if (headRes.headers['content-length']) {
-      contentLength = parseInt(headRes.headers['content-length'], 10);
-    }
-    if (headRes.headers['accept-ranges'] === 'bytes') {
-      supportsRange = true;
-    }
-    
-    // Better filename extraction
-    const contentDisposition = headRes.headers['content-disposition'];
-    if (contentDisposition) {
-      const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-      if (match && match[1]) {
-        const cdFilename = match[1].replace(/['"]/g, '').trim();
-        if (cdFilename) filename = cdFilename;
-      }
-    }
-  } catch (err) {
-    console.log("HEAD request failed, falling back to GET check:", err.message);
+  if (existsSync(localBin)) {
+    options.executablePath = localBin;
   }
 
-  const finalPath = join(TMP_DIR, filename);
-
-  // 2. Decide download strategy
-  if (supportsRange && contentLength && contentLength > CHUNK_SIZE) {
-    console.log(`🚀 Starting chunked download: ${filename} (${(contentLength / 1024 / 1024).toFixed(2)} MB)`);
-    
-    const chunks = [];
-    for (let i = 0; i < contentLength; i += CHUNK_SIZE) {
-      const end = Math.min(i + CHUNK_SIZE - 1, contentLength - 1);
-      chunks.push({ start: i, end, index: chunks.length });
-    }
-
-    // Download chunks concurrently
-    await asyncPool(MAX_CONCURRENT, chunks, async (chunk) => {
-      const chunkPath = `${finalPath}.part${chunk.index}`;
-      const res = await axios.get(url, {
-        headers: { ...standardHeaders, 'Range': `bytes=${chunk.start}-${chunk.end}` },
-        responseType: 'stream',
-        timeout: 60000
-      });
-      const writer = createWriteStream(chunkPath);
-      await pipeline(res.data, writer);
-    });
-
-    console.log(`🧩 All chunks downloaded for ${filename}. Merging...`);
-    // Merge chunks
-    const finalWriter = createWriteStream(finalPath);
-    for (const chunk of chunks) {
-      const chunkPath = `${finalPath}.part${chunk.index}`;
-      const data = await fsPromises.readFile(chunkPath);
-      finalWriter.write(data);
-      await fsPromises.unlink(chunkPath); // Clean up part
-    }
-    finalWriter.end();
-    
-    // Wait for writer to finish
-    await new Promise(resolve => finalWriter.on('finish', resolve));
-    
-  } else {
-    // Fallback: Single stream download
-    console.log(`⬇️ Starting standard download: ${filename}`);
-    const response = await axios.get(url, {
-      responseType: 'stream',
-      timeout: 60000 * 5,
-      headers: standardHeaders
-    });
-
-    const writer = createWriteStream(finalPath);
-    await pipeline(response.data, writer);
+  if (cookiesPath && existsSync(cookiesPath)) {
+    options.cookies = cookiesPath;
   }
 
-  console.log(`✅ Downloaded: ${filename} (${finalPath})`);
+  console.log(`🚀 yt-dlp starting: ${url} [format=${format}, quality=${quality}]`);
+
+  // youtube-dl-exec streams stdout lines via the returned process
+  const subprocess = youtubedl.exec(url, options);
+
+  subprocess.stdout?.on('data', (chunk) => {
+    const line = chunk.toString().trim();
+    if (line && onProgress) onProgress(line);
+    console.log('[yt-dlp]', line);
+  });
+
+  subprocess.stderr?.on('data', (chunk) => {
+    console.error('[yt-dlp stderr]', chunk.toString().trim());
+  });
+
+  await subprocess;
+
+  // Find the file created during this run
+  const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
+  if (!files.length) throw new Error('yt-dlp finished but no output file was found.');
+
+  const finalPath = join(TMP_DIR, files[0]);
+  console.log(`✅ yt-dlp downloaded: ${files[0]}`);
   return finalPath;
 }

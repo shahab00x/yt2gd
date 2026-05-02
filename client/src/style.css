@@ -163,6 +163,23 @@ body::before {
   padding: 12px;
 }
 
+.version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px 10px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.version-info code {
+  font-family: 'Courier New', monospace;
+  font-size: 0.72rem;
+  color: var(--accent-light);
+}
+
 /* ---- Main Content ---- */
 .main-content {
   flex: 1;

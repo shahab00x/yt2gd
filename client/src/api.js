@@ -27,5 +27,30 @@ export const api = {
   me: () => request('GET', '/auth/me'),
   getSettings: () => request('GET', '/auth/settings'),
   saveSettings: (data) => request('POST', '/auth/settings', data),
-  transfer: (url) => request('POST', '/transfer', { url })
+  transfer: (url, format, quality) => request('POST', '/transfer', { url, format, quality }),
+  getInfo: () => request('GET', '/auth/info'),
+  getCookiesStatus: () => request('GET', '/auth/cookies/status'),
+  deleteCookies: () => request('DELETE', '/auth/cookies'),
+
+  /**
+   * Upload a cookies.txt file (multipart/form-data).
+   */
+  uploadCookies: async (file) => {
+    const formData = new FormData();
+    formData.append('cookies', file);
+    const res = await fetch(`${BASE}/auth/cookies`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  },
+
+  /**
+   * Open an SSE connection for transfer progress.
+   * Returns the EventSource object. Caller is responsible for closing it.
+   */
+  openProgressStream: () => new EventSource(`${BASE}/transfer/progress`, { withCredentials: true }),
 };
