@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, createWriteStream } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { create } from 'youtube-dl-exec';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,22 +14,140 @@ function ensureTmpDir() {
 }
 
 /**
- * Download a URL (YouTube or Direct) using yt-dlp.
- * Emits raw yt-dlp stdout lines as progress via onProgress callback.
- * Can be cancelled via abortSignal.
- *
- * @param {string} url - The URL to download
- * @param {string} format - 'video' or 'audio'
- * @param {string} quality - 'best', 'worst', '1080', '720', '480', '360'
- * @param {string|null} cookiesPath - Path to a cookies.txt file (optional)
- * @param {function} onProgress - Called with a raw log line string
- * @param {AbortSignal} abortSignal - Signal to cancel the download
- * @returns {Promise<string>} - Absolute path to the downloaded file
+ * High-speed Parallel Downloader for direct media URLs.
+ * achieve "IDM-like" speeds by opening multiple range-based connections.
  */
-export async function downloadYtDlp(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null) {
+class ParallelDownloader {
+  constructor(url, outputPath, options = {}) {
+    this.url = url;
+    this.outputPath = outputPath;
+    this.concurrency = options.concurrency || 5;
+    this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB
+    this.onProgress = options.onProgress || (() => {});
+    this.abortSignal = options.abortSignal;
+    this.aborted = false;
+    this.downloadedBytes = 0;
+    this.totalBytes = 0;
+    this.startTime = Date.now();
+  }
+
+  async download() {
+    ensureTmpDir();
+    
+    // Get file size
+    const head = await axios.head(this.url, { timeout: 10000 });
+    this.totalBytes = parseInt(head.headers['content-length'], 10);
+    
+    if (isNaN(this.totalBytes)) {
+      throw new Error('Could not determine file size for parallel download.');
+    }
+
+    const numChunks = Math.ceil(this.totalBytes / this.chunkSize);
+    const chunks = Array.from({ length: numChunks }, (_, i) => ({
+      start: i * this.chunkSize,
+      end: Math.min((i + 1) * this.chunkSize - 1, this.totalBytes - 1),
+      index: i,
+    }));
+
+    console.log(`🚀 Starting parallel download: ${numChunks} chunks, ${this.concurrency} concurrent.`);
+
+    const writeStream = createWriteStream(this.outputPath);
+    
+    // Simple pool implementation
+    let active = 0;
+    let nextIndex = 0;
+    const results = [];
+
+    return new Promise((resolve, reject) => {
+      const downloadNext = async () => {
+        if (this.aborted) return;
+        if (nextIndex >= numChunks) {
+          if (active === 0) resolve(this.outputPath);
+          return;
+        }
+
+        const chunk = chunks[nextIndex++];
+        active++;
+
+        try {
+          const response = await axios.get(this.url, {
+            headers: { Range: `bytes=${chunk.start}-${chunk.end}` },
+            responseType: 'arraybuffer',
+            signal: this.abortSignal,
+          });
+
+          results[chunk.index] = response.data;
+          this.downloadedBytes += response.data.byteLength;
+          
+          const elapsed = (Date.now() - this.startTime) / 1000;
+          const speed = this.downloadedBytes / elapsed;
+          const percent = (this.downloadedBytes / this.totalBytes) * 100;
+
+          this.onProgress({
+            downloaded: this.downloadedBytes,
+            total: this.totalBytes,
+            speed,
+            percent,
+            label: `Downloading: ${Math.round(percent)}% (${(speed / 1024 / 1024).toFixed(2)} MB/s)`
+          });
+
+          active--;
+          downloadNext();
+        } catch (err) {
+          active--;
+          this.aborted = true;
+          reject(err);
+        }
+      };
+
+      // Start initial batch
+      for (let i = 0; i < Math.min(this.concurrency, numChunks); i++) {
+        downloadNext();
+      }
+    }).then(() => {
+      // Merge results to file
+      for (const buffer of results) {
+        writeStream.write(buffer);
+      }
+      writeStream.end();
+      return this.outputPath;
+    });
+  }
+}
+
+/**
+ * Detect if a URL is a YouTube page or a direct media link.
+ */
+function isYouTubePage(url) {
+  try {
+    const { hostname, pathname } = new URL(url);
+    const isYT = hostname.includes('youtube.com') || hostname.includes('youtu.be');
+    // If it contains /videoplayback or rrX---sn, it's a direct stream URL, not the page.
+    const isStream = hostname.includes('googlevideo.com') || pathname.includes('videoplayback');
+    return isYT && !isStream;
+  } catch { return false; }
+}
+
+/**
+ * Download a URL using the best method available.
+ */
+export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null) {
   ensureTmpDir();
 
-  const baseName = `ytdlp_${Date.now()}`;
+  const isYT = isYouTubePage(url);
+  const baseName = `dl_${Date.now()}`;
+  const localPath = join(TMP_DIR, `${baseName}.tmp`);
+
+  if (!isYT) {
+    // High-speed parallel path for direct URLs
+    const downloader = new ParallelDownloader(url, localPath, {
+      onProgress: (p) => onProgress && onProgress(p.label),
+      abortSignal
+    });
+    return await downloader.download();
+  }
+
+  // yt-dlp path for YouTube pages
   const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
 
   let formatStr;
@@ -46,28 +165,28 @@ export async function downloadYtDlp(url, format = 'video', quality = 'best', coo
     noWarnings: true,
     newline: true,
     progress: true,
+    noPlaylist: true, // Avoid "NoneType" errors on videos in playlists
+    concurrentFragments: 5, // Speed up fragment-based downloads
   };
 
   if (cookiesPath && existsSync(cookiesPath)) {
     options.cookies = cookiesPath;
   }
 
-  // Find the yt-dlp binary path (placed by our postinstall script)
   const binDir = join(__dirname, '../../bin');
   const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
   const localBin = join(binDir, binName);
-
-  // Use the wrapper's .create() to target the local executable cleanly
   const youtubedl = existsSync(localBin) ? create(localBin) : create('yt-dlp');
 
-  console.log(`🚀 yt-dlp starting: ${url} [format=${format}, quality=${quality}]`);
+  console.log(`🚀 yt-dlp starting: ${url}`);
 
   const subprocess = youtubedl.exec(url, options);
 
-  // Handle Cancellation
   const onAbort = () => {
-    console.log(`🛑 yt-dlp download cancelled for ${url}`);
-    subprocess.cancel();
+    console.log(`🛑 Cancellation triggered for ${url}`);
+    if (subprocess && typeof subprocess.kill === 'function') {
+      subprocess.kill('SIGKILL');
+    }
   };
 
   if (abortSignal) {
@@ -78,33 +197,19 @@ export async function downloadYtDlp(url, format = 'video', quality = 'best', coo
   subprocess.stdout?.on('data', (chunk) => {
     const line = chunk.toString().trim();
     if (line && onProgress) onProgress(line);
-    // console.log('[yt-dlp]', line); // Optional: keep raw logs in terminal
-  });
-
-  subprocess.stderr?.on('data', (chunk) => {
-    console.error('[yt-dlp stderr]', chunk.toString().trim());
   });
 
   try {
     await subprocess;
   } catch (err) {
-    if (abortSignal?.aborted) {
-      throw new Error('Download was cancelled by user.');
-    }
+    if (abortSignal?.aborted) throw new Error('Download was cancelled by user.');
     throw err;
   } finally {
     if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
   }
 
-  // Find the file created during this run
   const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
+  if (!files.length) throw new Error('Download finished but no output file found.');
   
-  if (!files.length) {
-    if (abortSignal?.aborted) throw new Error('Download was cancelled by user.');
-    throw new Error('yt-dlp finished but no output file was found.');
-  }
-
-  const finalPath = join(TMP_DIR, files[0]);
-  console.log(`✅ yt-dlp downloaded: ${files[0]}`);
-  return finalPath;
+  return join(TMP_DIR, files[0]);
 }

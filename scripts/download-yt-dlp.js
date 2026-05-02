@@ -19,8 +19,8 @@ const IS_WIN = process.platform === 'win32';
 const BIN_NAME = IS_WIN ? 'yt-dlp.exe' : 'yt-dlp';
 const BIN_PATH = join(BIN_DIR, BIN_NAME);
 const DOWNLOAD_URL = IS_WIN
-  ? 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
-  : 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
+  ? 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe'
+  : 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp';
 
 if (existsSync(BIN_PATH)) {
   console.log(`[yt-dlp] Binary already exists at ${BIN_PATH}, skipping download.`);

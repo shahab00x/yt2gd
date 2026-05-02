@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { existsSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { requireAuth } from './auth.js';
-import { downloadYtDlp } from '../services/downloader.js';
+import { downloadFile } from '../services/downloader.js';
 import { uploadToGDrive, getTodayFolderName } from '../services/gdrive.js';
 import { loadSettings } from '../services/settings.js';
 
@@ -111,7 +111,7 @@ router.post('/', async (req, res) => {
       ? settings.cookiesPath
       : null;
 
-    localPath = await downloadYtDlp(url, format, quality, cookiesPath, (line) => {
+    localPath = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });
     }, signal);
 
