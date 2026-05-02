@@ -5,7 +5,9 @@
 - **Backend Framework**: Node.js with Express.js to serve the Vite frontend and handle the backend API operations.
 - **Authentication**: Simple session-based or token-based authentication using the configured password.
 - **Google Drive Integration**: Official `googleapis` npm package.
-- **File Downloading**: Native `https`/`http` modules or lightweight HTTP client like `axios` to stream files to local disk to support large files without consuming too much memory.
+- **File Downloading**: 
+  - **Direct/Raw URLs**: Lightweight HTTP client (`axios`) executing concurrent HTTP Range requests to download file chunks in parallel, avoiding server-side throttling.
+  - **YouTube URLs**: Integration with `yt-dlp` executable (via a wrapper like `youtube-dl-exec`) to extract streams and manage format/quality selection, authenticated via user-uploaded cookies.
 
 ## 2. Data Models
 ### Settings Model (Stored locally in `settings.json`)

@@ -12,7 +12,9 @@
 
 ## File Processing
 - **The system shall** provide an input field for the user to submit a URL to a file.
-- **When** a URL is submitted, **the system shall** download the file from the URL to the remote server's local storage.
+- **When** a raw media URL (e.g., `googlevideo.com`) or direct file URL is submitted, **the system shall** download the file to the remote server's local storage using concurrent HTTP Range requests to bypass speed throttling.
+- **When** a standard YouTube page URL (e.g., `youtube.com/watch`) is submitted, **the system shall** utilize `yt-dlp` to process the URL, allowing the user to select the desired format (Video/Audio) and quality.
+- **The system shall** allow the user to upload browser cookies (`cookies.txt`) via the interface to authenticate `yt-dlp` and bypass restrictions.
 
 ## Google Drive Upload
 - **When** the file download is complete, **the system shall** determine the current date formatted as "Month_Day" (e.g., "May_1").
