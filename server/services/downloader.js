@@ -185,7 +185,8 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   const clean = cleanUrl(url);
   const isYT = isYouTubePage(url);
-  const baseName = `dl_${Date.now()}`;
+  // const baseName = `${Date.now().toString().slice(-4)}`;
+  const baseName = Date.now().toString().slice(-4);
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
   if (!isYT) {
@@ -199,7 +200,8 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   // yt-dlp path for YouTube pages
   // const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
-  const outputTemplate = join(TMP_DIR, `${baseName}_%(title)s.%(ext)s`);
+  // const outputTemplate = join(TMP_DIR, `${baseName}_%(title)s.%(ext)s`);
+  const outputTemplate = join(TMP_DIR, `%(channel)s - %(title)s - ${baseName}.%(ext)s`);
 
   let formatStr;
   if (format === 'audio') {
