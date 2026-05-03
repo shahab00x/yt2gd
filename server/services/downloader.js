@@ -272,7 +272,9 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
   }
 
-  const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
+  // const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
+  const files = readdirSync(TMP_DIR).filter(f => f.includes(`- ${baseName}.`));
+
   if (!files.length) throw new Error('Download finished but no output file found.');
 
   return join(TMP_DIR, files[0]);
