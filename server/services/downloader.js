@@ -16,12 +16,24 @@ function ensureTmpDir() {
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';
 
 /**
+ * Sanitize URL to handle potential markdown links or extra whitespace.
+ */
+function cleanUrl(rawUrl) {
+  if (!rawUrl) return '';
+  const trimmed = rawUrl.trim();
+  // Strip markdown: [text](url) → url
+  const match = trimmed.match(/^\[.*?\]\((https?:\/\/[^\)]+)\)$/);
+  const url = match ? match[1] : trimmed;
+  // Further strip any accidental markdown-like trailing chars
+  return url.replace(/[\[\]\(\)]/g, ''); 
+}
+
+/**
  * High-speed Parallel Downloader for direct media URLs.
- * achieve "IDM-like" speeds by opening multiple range-based connections.
  */
 class ParallelDownloader {
   constructor(url, outputPath, options = {}) {
-    this.url = url;
+    this.url = cleanUrl(url);
     this.outputPath = outputPath;
     this.concurrency = options.concurrency || 5;
     this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB
@@ -32,6 +44,7 @@ class ParallelDownloader {
     this.totalBytes = 0;
     this.startTime = Date.now();
     this.userAgent = options.userAgent || DEFAULT_UA;
+    this.fd = null;
   }
 
   async download() {
@@ -57,7 +70,7 @@ class ParallelDownloader {
 
     console.log(`🚀 Starting parallel download: ${numChunks} chunks, ${this.concurrency} concurrent. Total size: ${(this.totalBytes / 1024 / 1024).toFixed(2)} MB`);
 
-    const fd = openSync(this.outputPath, 'w');
+    this.fd = openSync(this.outputPath, 'w');
     let active = 0;
     let nextIndex = 0;
     let completedChunks = 0;
@@ -88,7 +101,9 @@ class ParallelDownloader {
           });
 
           // Write chunk to its specific position in the file
-          writeSync(fd, Buffer.from(response.data), 0, response.data.byteLength, chunk.start);
+          if (this.fd !== null) {
+            writeSync(this.fd, Buffer.from(response.data), 0, response.data.byteLength, chunk.start);
+          }
           
           this.downloadedBytes += response.data.byteLength;
           completedChunks++;
@@ -109,10 +124,15 @@ class ParallelDownloader {
           downloadNext();
         } catch (err) {
           active--;
-          this.aborted = true;
-          closeSync(fd);
-          console.error(`❌ Chunk ${chunk.index} failed:`, err.message);
-          reject(new Error(`Chunk download failed: ${err.message}`));
+          if (!this.aborted) {
+            this.aborted = true;
+            if (this.fd !== null) {
+              try { closeSync(this.fd); } catch (e) {}
+              this.fd = null;
+            }
+            console.error(`❌ Chunk ${chunk.index} failed:`, err.message);
+            reject(new Error(`Chunk download failed: ${err.message}`));
+          }
         }
       };
 
@@ -144,12 +164,13 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   ensureTmpDir();
 
   const isYT = isYouTubePage(url);
+  const clean = cleanUrl(url);
   const baseName = `dl_${Date.now()}`;
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
   if (!isYT) {
     // High-speed parallel path for direct URLs
-    const downloader = new ParallelDownloader(url, localPath, {
+    const downloader = new ParallelDownloader(clean, localPath, {
       onProgress: (p) => onProgress && onProgress(p.label),
       abortSignal
     });
@@ -192,9 +213,9 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const localBin = join(binDir, binName);
   const youtubedl = existsSync(localBin) ? create(localBin) : create('yt-dlp');
 
-  console.log(`🚀 yt-dlp starting: ${url}`);
+  console.log(`🚀 yt-dlp starting: ${clean}`);
 
-  const subprocess = youtubedl.exec(url, options);
+  const subprocess = youtubedl.exec(clean, options);
 
   const onAbort = () => {
     console.log(`🛑 Cancellation triggered for ${url}`);
