@@ -1,6 +1,6 @@
 {
   "name": "yt2gd",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Download a file from a URL and upload it to Google Drive.",
   "type": "module",
   "scripts": {

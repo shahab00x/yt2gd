@@ -13,7 +13,7 @@ function ensureTmpDir() {
   if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
 }
 
-const DEFAULT_UA = '"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0"';
+const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';
 
 /**
  * Sanitize URL to handle potential markdown links or extra whitespace.
@@ -198,7 +198,8 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   }
 
   // yt-dlp path for YouTube pages
-  const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
+  // const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
+  const outputTemplate = join(TMP_DIR, `${baseName}_%(title)s.%(ext)s`);
 
   let formatStr;
   if (format === 'audio') {
