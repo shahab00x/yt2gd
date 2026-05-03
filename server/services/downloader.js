@@ -185,8 +185,8 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   const clean = cleanUrl(url);
   const isYT = isYouTubePage(url);
-  // const baseName = `${Date.now().toString().slice(-4)}`;
-  const baseName = Date.now().toString().slice(-4);
+  const baseName = `${Date.now().toString().slice(-4)}`;
+  // const baseName = Date.now().toString().slice(-4);
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
   if (!isYT) {
