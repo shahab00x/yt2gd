@@ -105,11 +105,16 @@ router.post('/', async (req, res) => {
     // --- Download phase ---
     sendSSE('status', { phase: 'download', message: 'Starting download…' });
 
-    // Resolve cookies path from settings
+    // Resolve and filter cookies path from settings
     const settings = loadSettings();
-    const cookiesPath = settings.cookiesPath && existsSync(settings.cookiesPath)
+    let cookiesPath = settings.cookiesPath && existsSync(settings.cookiesPath)
       ? settings.cookiesPath
       : null;
+    
+    if (cookiesPath) {
+      const { filterCookies } = await import('../services/downloader.js');
+      cookiesPath = filterCookies(cookiesPath);
+    }
 
     localPath = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });

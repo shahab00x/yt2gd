@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, createWriteStream, openSync, writeSync, closeSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, createWriteStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { create } from 'youtube-dl-exec';
@@ -20,16 +20,49 @@ const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20
  */
 function cleanUrl(rawUrl) {
   if (!rawUrl) return '';
-  const trimmed = rawUrl.trim();
+  let url = rawUrl.trim();
+  
   // Strip markdown: [text](url) → url
-  const match = trimmed.match(/^\[.*?\]\((https?:\/\/[^\)]+)\)$/);
-  const url = match ? match[1] : trimmed;
-  // Further strip any accidental markdown-like trailing chars
-  return url.replace(/[\[\]\(\)]/g, '');
+  const match = url.match(/\[.*?\]\((https?:\/\/[^\)]+)\)/);
+  if (match) url = match[1];
+
+  // More aggressive: find the first http... and take it until a space, bracket, or paren
+  const httpMatch = url.match(/(https?:\/\/[^\s\]\)\(\[>]+)/);
+  if (httpMatch) url = httpMatch[1];
+  
+  return url;
+}
+
+/**
+ * Filter cookies.txt to only include domains relevant to YouTube/Google.
+ * This prevents "HTTP 413: Request Entity Too Large" errors.
+ */
+export function filterCookies(cookiesPath) {
+  if (!cookiesPath || !existsSync(cookiesPath)) return cookiesPath;
+  try {
+    const content = readFileSync(cookiesPath, 'utf8');
+    const lines = content.split('\n');
+    const filtered = lines.filter(line => {
+      if (line.startsWith('#') || !line.trim()) return true;
+      const domain = line.split('\t')[0] || '';
+      return domain.includes('youtube.com') || 
+             domain.includes('google.com') || 
+             domain.includes('googlevideo.com') ||
+             domain.includes('youtube-nocookie.com');
+    });
+    
+    const newPath = cookiesPath.replace('.txt', '_filtered.txt');
+    writeFileSync(newPath, filtered.join('\n'));
+    return newPath;
+  } catch (err) {
+    console.warn('⚠️ Cookie filtering failed, using raw file:', err.message);
+    return cookiesPath;
+  }
 }
 
 /**
  * High-speed Parallel Downloader for direct media URLs.
+ * Uses individual fragment files to avoid "ESPIPE: invalid seek" errors on Linux.
  */
 class ParallelDownloader {
   constructor(url, outputPath, options = {}) {
@@ -37,52 +70,46 @@ class ParallelDownloader {
     this.outputPath = outputPath;
     this.concurrency = options.concurrency || 5;
     this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB
-    this.onProgress = options.onProgress || (() => { });
+    this.onProgress = options.onProgress || (() => {});
     this.abortSignal = options.abortSignal;
     this.aborted = false;
     this.downloadedBytes = 0;
     this.totalBytes = 0;
     this.startTime = Date.now();
     this.userAgent = options.userAgent || DEFAULT_UA;
-    this.fd = null;
+    this.fragmentDir = join(dirname(outputPath), `fragments_${Date.now()}`);
   }
 
   async download() {
     ensureTmpDir();
-
-    // Get file size
-    const head = await axios.head(this.url, {
-      timeout: 15000,
+    if (!existsSync(this.fragmentDir)) mkdirSync(this.fragmentDir, { recursive: true });
+    
+    const head = await axios.head(this.url, { 
+      timeout: 15000, 
       headers: { 'User-Agent': this.userAgent }
     });
     this.totalBytes = parseInt(head.headers['content-length'], 10);
-
-    if (isNaN(this.totalBytes)) {
-      throw new Error('Could not determine file size for parallel download.');
-    }
+    
+    if (isNaN(this.totalBytes)) throw new Error('Could not determine file size.');
 
     const numChunks = Math.ceil(this.totalBytes / this.chunkSize);
     const chunks = Array.from({ length: numChunks }, (_, i) => ({
       start: i * this.chunkSize,
       end: Math.min((i + 1) * this.chunkSize - 1, this.totalBytes - 1),
       index: i,
+      path: join(this.fragmentDir, `part_${i}.tmp`)
     }));
 
-    console.log(`🚀 Starting parallel download: ${numChunks} chunks, ${this.concurrency} concurrent. Total size: ${(this.totalBytes / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`🚀 Starting parallel download: ${numChunks} chunks, ${this.concurrency} concurrent.`);
 
-    this.fd = openSync(this.outputPath, 'w');
     let active = 0;
     let nextIndex = 0;
-    let completedChunks = 0;
 
     return new Promise((resolve, reject) => {
       const downloadNext = async () => {
         if (this.aborted) return;
         if (nextIndex >= numChunks) {
-          if (active === 0) {
-            if (this.fd !== null) { closeSync(this.fd); this.fd = null; }
-            resolve(this.outputPath);
-          }
+          if (active === 0) resolve(this.mergeFragments(chunks));
           return;
         }
 
@@ -91,32 +118,19 @@ class ParallelDownloader {
 
         try {
           const response = await axios.get(this.url, {
-            headers: {
-              'Range': `bytes=${chunk.start}-${chunk.end}`,
-              'User-Agent': this.userAgent
-            },
+            headers: { 'Range': `bytes=${chunk.start}-${chunk.end}`, 'User-Agent': this.userAgent },
             responseType: 'arraybuffer',
             signal: this.abortSignal,
-            timeout: 60000, // 60s timeout per chunk
+            timeout: 60000,
           });
 
-          // Write chunk to its specific position in the file
-          if (this.fd !== null) {
-            writeSync(this.fd, Buffer.from(response.data), 0, response.data.byteLength, chunk.start);
-          }
-
+          writeFileSync(chunk.path, Buffer.from(response.data));
           this.downloadedBytes += response.data.byteLength;
-          completedChunks++;
-
-          const elapsed = (Date.now() - this.startTime) / 1000;
-          const speed = this.downloadedBytes / elapsed;
+          
+          const speed = this.downloadedBytes / ((Date.now() - this.startTime) / 1000);
           const percent = (this.downloadedBytes / this.totalBytes) * 100;
 
           this.onProgress({
-            downloaded: this.downloadedBytes,
-            total: this.totalBytes,
-            speed,
-            percent,
             label: `Downloading: ${Math.round(percent)}% (${(speed / 1024 / 1024).toFixed(2)} MB/s)`
           });
 
@@ -126,21 +140,27 @@ class ParallelDownloader {
           active--;
           if (!this.aborted) {
             this.aborted = true;
-            if (this.fd !== null) {
-              try { closeSync(this.fd); } catch (e) { }
-              this.fd = null;
-            }
-            console.error(`❌ Chunk ${chunk.index} failed:`, err.message);
-            reject(new Error(`Chunk download failed: ${err.message}`));
+            reject(err);
           }
         }
       };
 
-      // Start initial batch
-      for (let i = 0; i < Math.min(this.concurrency, numChunks); i++) {
-        downloadNext();
-      }
+      for (let i = 0; i < Math.min(this.concurrency, numChunks); i++) downloadNext();
     });
+  }
+
+  async mergeFragments(chunks) {
+    console.log('🔄 Merging fragments...');
+    const writer = createWriteStream(this.outputPath);
+    for (const chunk of chunks) {
+      const buffer = readFileSync(chunk.path);
+      writer.write(buffer);
+      unlinkSync(chunk.path);
+    }
+    writer.end();
+    // Clean up dir
+    try { readdirSync(this.fragmentDir).forEach(f => unlinkSync(join(this.fragmentDir, f))); } catch {}
+    return this.outputPath;
   }
 }
 
@@ -200,7 +220,8 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     userAgent: DEFAULT_UA,
     noJsRuntimes: true,     // → --no-js-runtimes (disables deno first)
     jsRuntimes: 'node',
-    socketTimeout: 30,
+    remoteComponents: 'ejs:github', // Auto-download solver scripts
+    socketTimeout: 120,
     noCheckCertificates: true,
     geoBypass: true,
   };
