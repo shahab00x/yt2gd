@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, createWriteStream } from 'fs';
+import { existsSync, mkdirSync, readdirSync, createWriteStream, openSync, writeSync, closeSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { create } from 'youtube-dl-exec';
@@ -12,6 +12,8 @@ export const TMP_DIR = join(__dirname, '../../tmp');
 function ensureTmpDir() {
   if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
 }
+
+const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';
 
 /**
  * High-speed Parallel Downloader for direct media URLs.
@@ -29,13 +31,17 @@ class ParallelDownloader {
     this.downloadedBytes = 0;
     this.totalBytes = 0;
     this.startTime = Date.now();
+    this.userAgent = options.userAgent || DEFAULT_UA;
   }
 
   async download() {
     ensureTmpDir();
     
     // Get file size
-    const head = await axios.head(this.url, { timeout: 10000 });
+    const head = await axios.head(this.url, { 
+      timeout: 15000, 
+      headers: { 'User-Agent': this.userAgent }
+    });
     this.totalBytes = parseInt(head.headers['content-length'], 10);
     
     if (isNaN(this.totalBytes)) {
@@ -49,20 +55,21 @@ class ParallelDownloader {
       index: i,
     }));
 
-    console.log(`🚀 Starting parallel download: ${numChunks} chunks, ${this.concurrency} concurrent.`);
+    console.log(`🚀 Starting parallel download: ${numChunks} chunks, ${this.concurrency} concurrent. Total size: ${(this.totalBytes / 1024 / 1024).toFixed(2)} MB`);
 
-    const writeStream = createWriteStream(this.outputPath);
-    
-    // Simple pool implementation
+    const fd = openSync(this.outputPath, 'w');
     let active = 0;
     let nextIndex = 0;
-    const results = [];
+    let completedChunks = 0;
 
     return new Promise((resolve, reject) => {
       const downloadNext = async () => {
         if (this.aborted) return;
         if (nextIndex >= numChunks) {
-          if (active === 0) resolve(this.outputPath);
+          if (active === 0) {
+            closeSync(fd);
+            resolve(this.outputPath);
+          }
           return;
         }
 
@@ -71,13 +78,20 @@ class ParallelDownloader {
 
         try {
           const response = await axios.get(this.url, {
-            headers: { Range: `bytes=${chunk.start}-${chunk.end}` },
+            headers: { 
+              'Range': `bytes=${chunk.start}-${chunk.end}`,
+              'User-Agent': this.userAgent
+            },
             responseType: 'arraybuffer',
             signal: this.abortSignal,
+            timeout: 60000, // 60s timeout per chunk
           });
 
-          results[chunk.index] = response.data;
+          // Write chunk to its specific position in the file
+          writeSync(fd, Buffer.from(response.data), 0, response.data.byteLength, chunk.start);
+          
           this.downloadedBytes += response.data.byteLength;
+          completedChunks++;
           
           const elapsed = (Date.now() - this.startTime) / 1000;
           const speed = this.downloadedBytes / elapsed;
@@ -96,7 +110,9 @@ class ParallelDownloader {
         } catch (err) {
           active--;
           this.aborted = true;
-          reject(err);
+          closeSync(fd);
+          console.error(`❌ Chunk ${chunk.index} failed:`, err.message);
+          reject(new Error(`Chunk download failed: ${err.message}`));
         }
       };
 
@@ -104,13 +120,6 @@ class ParallelDownloader {
       for (let i = 0; i < Math.min(this.concurrency, numChunks); i++) {
         downloadNext();
       }
-    }).then(() => {
-      // Merge results to file
-      for (const buffer of results) {
-        writeStream.write(buffer);
-      }
-      writeStream.end();
-      return this.outputPath;
     });
   }
 }
@@ -167,6 +176,11 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     progress: true,
     noPlaylist: true, // Avoid "NoneType" errors on videos in playlists
     concurrentFragments: 5, // Speed up fragment-based downloads
+    userAgent: DEFAULT_UA,
+    jsRuntimes: 'node',
+    socketTimeout: 120,
+    noCheckCertificates: true,
+    geoBypass: true,
   };
 
   if (cookiesPath && existsSync(cookiesPath)) {
