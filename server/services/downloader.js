@@ -13,7 +13,7 @@ function ensureTmpDir() {
   if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
 }
 
-const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';
+const DEFAULT_UA = '"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0"';
 
 /**
  * Sanitize URL to handle potential markdown links or extra whitespace.
@@ -21,7 +21,7 @@ const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20
 function cleanUrl(rawUrl) {
   if (!rawUrl) return '';
   let url = rawUrl.trim();
-  
+
   // Strip markdown: [text](url) → url
   const match = url.match(/\[.*?\]\((https?:\/\/[^\)]+)\)/);
   if (match) url = match[1];
@@ -29,7 +29,7 @@ function cleanUrl(rawUrl) {
   // More aggressive: find the first http... and take it until a space, bracket, or paren
   const httpMatch = url.match(/(https?:\/\/[^\s\]\)\(\[>]+)/);
   if (httpMatch) url = httpMatch[1];
-  
+
   return url;
 }
 
@@ -45,12 +45,12 @@ export function filterCookies(cookiesPath) {
     const filtered = lines.filter(line => {
       if (line.startsWith('#') || !line.trim()) return true;
       const domain = line.split('\t')[0] || '';
-      return domain.includes('youtube.com') || 
-             domain.includes('google.com') || 
-             domain.includes('googlevideo.com') ||
-             domain.includes('youtube-nocookie.com');
+      return domain.includes('youtube.com') ||
+        domain.includes('google.com') ||
+        domain.includes('googlevideo.com') ||
+        domain.includes('youtube-nocookie.com');
     });
-    
+
     const newPath = cookiesPath.replace('.txt', '_filtered.txt');
     writeFileSync(newPath, filtered.join('\n'));
     return newPath;
@@ -70,7 +70,7 @@ class ParallelDownloader {
     this.outputPath = outputPath;
     this.concurrency = options.concurrency || 5;
     this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB
-    this.onProgress = options.onProgress || (() => {});
+    this.onProgress = options.onProgress || (() => { });
     this.abortSignal = options.abortSignal;
     this.aborted = false;
     this.downloadedBytes = 0;
@@ -83,13 +83,13 @@ class ParallelDownloader {
   async download() {
     ensureTmpDir();
     if (!existsSync(this.fragmentDir)) mkdirSync(this.fragmentDir, { recursive: true });
-    
-    const head = await axios.head(this.url, { 
-      timeout: 15000, 
+
+    const head = await axios.head(this.url, {
+      timeout: 15000,
       headers: { 'User-Agent': this.userAgent }
     });
     this.totalBytes = parseInt(head.headers['content-length'], 10);
-    
+
     if (isNaN(this.totalBytes)) throw new Error('Could not determine file size.');
 
     const numChunks = Math.ceil(this.totalBytes / this.chunkSize);
@@ -126,7 +126,7 @@ class ParallelDownloader {
 
           writeFileSync(chunk.path, Buffer.from(response.data));
           this.downloadedBytes += response.data.byteLength;
-          
+
           const speed = this.downloadedBytes / ((Date.now() - this.startTime) / 1000);
           const percent = (this.downloadedBytes / this.totalBytes) * 100;
 
@@ -159,7 +159,7 @@ class ParallelDownloader {
     }
     writer.end();
     // Clean up dir
-    try { readdirSync(this.fragmentDir).forEach(f => unlinkSync(join(this.fragmentDir, f))); } catch {}
+    try { readdirSync(this.fragmentDir).forEach(f => unlinkSync(join(this.fragmentDir, f))); } catch { }
     return this.outputPath;
   }
 }
