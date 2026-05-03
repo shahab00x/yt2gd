@@ -25,7 +25,7 @@ function cleanUrl(rawUrl) {
   const match = trimmed.match(/^\[.*?\]\((https?:\/\/[^\)]+)\)$/);
   const url = match ? match[1] : trimmed;
   // Further strip any accidental markdown-like trailing chars
-  return url.replace(/[\[\]\(\)]/g, ''); 
+  return url.replace(/[\[\]\(\)]/g, '');
 }
 
 /**
@@ -37,7 +37,7 @@ class ParallelDownloader {
     this.outputPath = outputPath;
     this.concurrency = options.concurrency || 5;
     this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB
-    this.onProgress = options.onProgress || (() => {});
+    this.onProgress = options.onProgress || (() => { });
     this.abortSignal = options.abortSignal;
     this.aborted = false;
     this.downloadedBytes = 0;
@@ -49,14 +49,14 @@ class ParallelDownloader {
 
   async download() {
     ensureTmpDir();
-    
+
     // Get file size
-    const head = await axios.head(this.url, { 
-      timeout: 15000, 
+    const head = await axios.head(this.url, {
+      timeout: 15000,
       headers: { 'User-Agent': this.userAgent }
     });
     this.totalBytes = parseInt(head.headers['content-length'], 10);
-    
+
     if (isNaN(this.totalBytes)) {
       throw new Error('Could not determine file size for parallel download.');
     }
@@ -80,7 +80,7 @@ class ParallelDownloader {
         if (this.aborted) return;
         if (nextIndex >= numChunks) {
           if (active === 0) {
-            closeSync(fd);
+            if (this.fd !== null) { closeSync(this.fd); this.fd = null; }
             resolve(this.outputPath);
           }
           return;
@@ -91,7 +91,7 @@ class ParallelDownloader {
 
         try {
           const response = await axios.get(this.url, {
-            headers: { 
+            headers: {
               'Range': `bytes=${chunk.start}-${chunk.end}`,
               'User-Agent': this.userAgent
             },
@@ -104,10 +104,10 @@ class ParallelDownloader {
           if (this.fd !== null) {
             writeSync(this.fd, Buffer.from(response.data), 0, response.data.byteLength, chunk.start);
           }
-          
+
           this.downloadedBytes += response.data.byteLength;
           completedChunks++;
-          
+
           const elapsed = (Date.now() - this.startTime) / 1000;
           const speed = this.downloadedBytes / elapsed;
           const percent = (this.downloadedBytes / this.totalBytes) * 100;
@@ -127,7 +127,7 @@ class ParallelDownloader {
           if (!this.aborted) {
             this.aborted = true;
             if (this.fd !== null) {
-              try { closeSync(this.fd); } catch (e) {}
+              try { closeSync(this.fd); } catch (e) { }
               this.fd = null;
             }
             console.error(`❌ Chunk ${chunk.index} failed:`, err.message);
@@ -163,8 +163,8 @@ function isYouTubePage(url) {
 export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null) {
   ensureTmpDir();
 
-  const isYT = isYouTubePage(url);
   const clean = cleanUrl(url);
+  const isYT = isYouTubePage(url);
   const baseName = `dl_${Date.now()}`;
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
@@ -192,14 +192,15 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const options = {
     output: outputTemplate,
     format: formatStr,
-    noWarnings: true,
+    // noWarnings: true,
     newline: true,
     progress: true,
     noPlaylist: true, // Avoid "NoneType" errors on videos in playlists
-    concurrentFragments: 5, // Speed up fragment-based downloads
+    concurrentFragments: 10, // Speed up fragment-based downloads
     userAgent: DEFAULT_UA,
+    noJsRuntimes: true,     // → --no-js-runtimes (disables deno first)
     jsRuntimes: 'node',
-    socketTimeout: 120,
+    socketTimeout: 30,
     noCheckCertificates: true,
     geoBypass: true,
   };
@@ -234,6 +235,10 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     if (line && onProgress) onProgress(line);
   });
 
+  subprocess.stderr?.on('data', (chunk) => {
+    console.error(`[yt-dlp] ${chunk.toString().trim()}`);
+  });
+
   try {
     await subprocess;
   } catch (err) {
@@ -245,6 +250,6 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
   if (!files.length) throw new Error('Download finished but no output file found.');
-  
+
   return join(TMP_DIR, files[0]);
 }
