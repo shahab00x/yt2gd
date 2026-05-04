@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, createWriteStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, basename } from 'path';
 import { create } from 'youtube-dl-exec';
 import axios from 'axios';
 
@@ -90,15 +90,17 @@ class ParallelDownloader {
         timeout: 15000,
         headers: { 'User-Agent': this.userAgent }
       });
+      this.updateOutputPath(headResponse.headers);
     } catch (e) {
       console.warn(`⚠️ HEAD request failed, falling back to stream download:`, e.message);
       return this.streamDownload();
     }
 
     this.totalBytes = headResponse?.headers ? parseInt(headResponse.headers['content-length'], 10) : NaN;
+    const acceptRanges = headResponse?.headers['accept-ranges'] === 'bytes';
 
-    if (isNaN(this.totalBytes) || this.totalBytes <= 0) {
-      console.warn(`⚠️ Unknown file size, falling back to stream download`);
+    if (isNaN(this.totalBytes) || this.totalBytes <= 0 || !acceptRanges) {
+      console.warn(`⚠️ Parallel download not supported (size: ${this.totalBytes}, ranges: ${acceptRanges}), falling back to stream download`);
       return this.streamDownload();
     }
 
@@ -159,8 +161,28 @@ class ParallelDownloader {
     });
   }
 
+  updateOutputPath(headers) {
+    try {
+      const cd = headers['content-disposition'];
+      let filename = '';
+      if (cd && cd.includes('filename=')) {
+        // Simple extraction, handles filename="name.ext" or filename=name.ext
+        filename = cd.split('filename=')[1].split(';')[0].replace(/['"]/g, '').trim();
+      } else {
+        const urlObj = new URL(this.url);
+        filename = basename(urlObj.pathname);
+      }
+      if (filename && filename !== '/' && filename.includes('.')) {
+        this.outputPath = join(dirname(this.outputPath), filename);
+        console.log(`📁 Target filename preserved: ${filename}`);
+      }
+    } catch (err) {
+      console.warn('⚠️ Could not determine original filename:', err.message);
+    }
+  }
+
   async streamDownload() {
-    console.log(`🚀 Starting single-stream download (unknown size).`);
+    console.log(`🚀 Starting single-stream download.`);
     return new Promise(async (resolve, reject) => {
       try {
         const response = await axios({
@@ -172,6 +194,7 @@ class ParallelDownloader {
           timeout: 60000,
         });
 
+        this.updateOutputPath(response.headers);
         if (response.headers['content-length']) {
            this.totalBytes = parseInt(response.headers['content-length'], 10) || 0;
         }
@@ -210,14 +233,14 @@ class ParallelDownloader {
   }
 
   async mergeFragments(chunks) {
-    console.log('🔄 Merging fragments...');
-    const writer = createWriteStream(this.outputPath);
+    console.log(`🔄 Merging ${chunks.length} fragments into ${basename(this.outputPath)}...`);
+    const fd = openSync(this.outputPath, 'w');
     for (const chunk of chunks) {
       const buffer = readFileSync(chunk.path);
-      writer.write(buffer);
+      writeSync(fd, buffer);
       unlinkSync(chunk.path);
     }
-    writer.end();
+    closeSync(fd);
     // Clean up dir
     try { readdirSync(this.fragmentDir).forEach(f => unlinkSync(join(this.fragmentDir, f))); } catch { }
     return this.outputPath;
