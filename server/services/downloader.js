@@ -84,13 +84,23 @@ class ParallelDownloader {
     ensureTmpDir();
     if (!existsSync(this.fragmentDir)) mkdirSync(this.fragmentDir, { recursive: true });
 
-    const head = await axios.head(this.url, {
-      timeout: 15000,
-      headers: { 'User-Agent': this.userAgent }
-    });
-    this.totalBytes = parseInt(head.headers['content-length'], 10);
+    let headResponse;
+    try {
+      headResponse = await axios.head(this.url, {
+        timeout: 15000,
+        headers: { 'User-Agent': this.userAgent }
+      });
+    } catch (e) {
+      console.warn(`⚠️ HEAD request failed, falling back to stream download:`, e.message);
+      return this.streamDownload();
+    }
 
-    if (isNaN(this.totalBytes)) throw new Error('Could not determine file size.');
+    this.totalBytes = headResponse?.headers ? parseInt(headResponse.headers['content-length'], 10) : NaN;
+
+    if (isNaN(this.totalBytes) || this.totalBytes <= 0) {
+      console.warn(`⚠️ Unknown file size, falling back to stream download`);
+      return this.streamDownload();
+    }
 
     const numChunks = Math.ceil(this.totalBytes / this.chunkSize);
     const chunks = Array.from({ length: numChunks }, (_, i) => ({
@@ -149,6 +159,56 @@ class ParallelDownloader {
     });
   }
 
+  async streamDownload() {
+    console.log(`🚀 Starting single-stream download (unknown size).`);
+    return new Promise(async (resolve, reject) => {
+      try {
+        const response = await axios({
+          method: 'GET',
+          url: this.url,
+          responseType: 'stream',
+          headers: { 'User-Agent': this.userAgent },
+          signal: this.abortSignal,
+          timeout: 60000,
+        });
+
+        if (response.headers['content-length']) {
+           this.totalBytes = parseInt(response.headers['content-length'], 10) || 0;
+        }
+
+        const writer = createWriteStream(this.outputPath);
+        response.data.pipe(writer);
+
+        response.data.on('data', (chunk) => {
+          if (this.aborted) {
+             response.data.destroy();
+             return;
+          }
+          this.downloadedBytes += chunk.length;
+          const speed = this.downloadedBytes / ((Date.now() - this.startTime) / 1000);
+          
+          let progressStr = `${(this.downloadedBytes / 1024 / 1024).toFixed(2)} MB downloaded`;
+          if (this.totalBytes) {
+             const percent = (this.downloadedBytes / this.totalBytes) * 100;
+             progressStr = `${Math.round(percent)}%`;
+          }
+          this.onProgress({
+            label: `Downloading: ${progressStr} (${(speed / 1024 / 1024).toFixed(2)} MB/s)`
+          });
+        });
+
+        writer.on('finish', () => resolve(this.outputPath));
+        writer.on('error', reject);
+        response.data.on('error', reject);
+      } catch (err) {
+        if (!this.aborted) {
+          this.aborted = true;
+          reject(err);
+        }
+      }
+    });
+  }
+
   async mergeFragments(chunks) {
     console.log('🔄 Merging fragments...');
     const writer = createWriteStream(this.outputPath);
@@ -185,8 +245,13 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   const clean = cleanUrl(url);
   const isYT = isYouTubePage(url);
-  const baseName = `${Date.now().toString().slice(-4)}`;
-  // const baseName = Date.now().toString().slice(-4);
+  
+  const d = new Date();
+  const h = d.getHours() % 12 || 12;
+  const m = d.getMinutes().toString().padStart(2, '0');
+  const s = d.getSeconds().toString().padStart(2, '0');
+  const baseName = `${h}${m}${s}`;
+  
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
   if (!isYT) {
@@ -201,7 +266,7 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   // yt-dlp path for YouTube pages
   // const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
   // const outputTemplate = join(TMP_DIR, `${baseName}_%(title)s.%(ext)s`);
-  const outputTemplate = join(TMP_DIR, `%(channel)s - %(title)s - ${baseName}.%(ext)s`);
+  const outputTemplate = join(TMP_DIR, `${baseName} - %(channel)s - %(title)s.%(ext)s`);
 
   let formatStr;
   if (format === 'audio') {
@@ -273,7 +338,7 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   }
 
   // const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
-  const files = readdirSync(TMP_DIR).filter(f => f.includes(`- ${baseName}.`));
+  const files = readdirSync(TMP_DIR).filter(f => f.startsWith(`${baseName} - `));
 
   if (!files.length) throw new Error('Download finished but no output file found.');
 
