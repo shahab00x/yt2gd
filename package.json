@@ -10,6 +10,7 @@
     "postinstall": "node scripts/download-yt-dlp.js"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "axios": "^1.6.8",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -19,6 +20,7 @@
     "multer": "^2.1.1",
     "node-downloader-helper": "^2.1.11",
     "progress-stream": "^2.0.0",
+    "webtorrent": "^1.9.7",
     "youtube-dl-exec": "^3.1.5"
   }
 }

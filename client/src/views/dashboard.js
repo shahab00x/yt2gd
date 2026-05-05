@@ -44,6 +44,10 @@ function isYouTubeUrl(url) {
   } catch { return false; }
 }
 
+function isMagnetUrl(url) {
+  return typeof url === 'string' && url.startsWith('magnet:?');
+}
+
 export async function renderDashboard(username, onNavigate) {
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
   const app = document.getElementById('app');
@@ -175,10 +179,17 @@ export async function renderDashboard(username, onNavigate) {
 
   fileUrlInput.addEventListener('input', () => {
     const url = fileUrlInput.value.trim();
+    const urlHint = document.getElementById('url-hint');
+    
     if (isYouTubeUrl(url)) {
       ytOptions.style.display = 'block';
+      urlHint.innerHTML = '✨ YouTube link detected. Select quality and format.';
+    } else if (isMagnetUrl(url)) {
+      ytOptions.style.display = 'none';
+      urlHint.innerHTML = '🧲 Magnet link detected. It will be zipped and uploaded.';
     } else {
       ytOptions.style.display = 'none';
+      urlHint.innerHTML = 'Paste a YouTube link, a Magnet link, or a direct file URL.';
     }
   });
 
@@ -242,8 +253,13 @@ export async function renderDashboard(username, onNavigate) {
     evtSource.addEventListener('progress', (e) => {
       const data = JSON.parse(e.data);
       if (data.phase === 'download') {
-        if (data.percent) progressFill.style.width = `${Math.min(data.percent * 0.5, 50)}%`;
-        progressDetail.textContent = data.label || (data.line ? data.line.substring(0, 80) : '');
+        let percent = data.percent;
+        if (percent === undefined && data.line) {
+          const m = data.line.match(/(\d+(?:\.\d+)?)%/);
+          if (m) percent = parseFloat(m[1]);
+        }
+        if (percent !== undefined) progressFill.style.width = `${Math.min(percent * 0.5, 50)}%`;
+        progressDetail.textContent = data.label || (data.line ? data.line.substring(0, 100) : '');
       } else if (data.phase === 'upload') {
         if (data.percent) progressFill.style.width = `${50 + Math.min(data.percent * 0.45, 45)}%`;
         progressDetail.textContent = data.label || '';

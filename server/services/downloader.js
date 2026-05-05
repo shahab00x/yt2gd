@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, createWriteStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, basename } from 'path';
 import { create } from 'youtube-dl-exec';
 import axios from 'axios';
+import WebTorrent from 'webtorrent';
+import archiver from 'archiver';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -261,6 +263,98 @@ function isYouTubePage(url) {
 }
 
 /**
+ * Detect if a URL is a magnet link.
+ */
+function isMagnet(url) {
+  return typeof url === 'string' && url.startsWith('magnet:?');
+}
+
+/**
+ * Zip a directory into a single file.
+ */
+async function zipDirectory(sourceDir, outPath) {
+  return new Promise((resolve, reject) => {
+    const output = createWriteStream(outPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', () => resolve(outPath));
+    archive.on('error', (err) => reject(err));
+
+    archive.pipe(output);
+    archive.directory(sourceDir, false);
+    archive.finalize();
+  });
+}
+
+/**
+ * Download a torrent via magnet link and zip it.
+ * Returns { zipPath, downloadDir } so the caller can clean up the directory later.
+ */
+async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null) {
+  return new Promise((resolve, reject) => {
+    // webtorrent can throw if magnet is invalid
+    let client;
+    try {
+      client = new WebTorrent();
+    } catch (err) {
+      return reject(err);
+    }
+
+    const torrentId = `torrent_${Date.now()}`;
+    const downloadDir = join(TMP_DIR, torrentId);
+    
+    if (!existsSync(downloadDir)) mkdirSync(downloadDir, { recursive: true });
+
+    client.add(magnetUrl, { path: downloadDir }, (torrent) => {
+      console.log(`🧲 Torrent metadata received: ${torrent.name}`);
+
+      const updateProgress = () => {
+        if (onProgress) {
+          const speed = (torrent.downloadSpeed / 1024 / 1024).toFixed(2);
+          const percent = (torrent.progress * 100).toFixed(1);
+          onProgress(`Downloading: ${percent}% (${speed} MB/s) · Peers: ${torrent.numPeers}`);
+        }
+      };
+
+      torrent.on('download', updateProgress);
+
+      torrent.on('done', async () => {
+        console.log(`✅ Torrent download complete: ${torrent.name}`);
+        // Sanitize filename for ZIP
+        const safeName = (torrent.name || torrentId).replace(/[^a-z0-9. _-]/gi, '_');
+        const zipPath = join(TMP_DIR, `${safeName}.zip`);
+        
+        try {
+          if (onProgress) onProgress(`Packaging into ZIP...`);
+          await zipDirectory(downloadDir, zipPath);
+          client.destroy();
+          resolve({ zipPath, downloadDir });
+        } catch (err) {
+          client.destroy();
+          reject(err);
+        }
+      });
+    });
+
+    client.on('error', (err) => {
+      console.error('❌ WebTorrent error:', err.message);
+      client.destroy();
+      reject(err);
+    });
+
+    if (abortSignal) {
+      const onAbort = () => {
+        console.log('🛑 Torrent download aborted.');
+        client.destroy();
+        reject(new Error('Download was cancelled by user.'));
+      };
+      if (abortSignal.aborted) onAbort();
+      else abortSignal.addEventListener('abort', onAbort);
+    }
+  });
+}
+
+/**
  * Download a URL using the best method available.
  */
 export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false) {
@@ -268,7 +362,12 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   const clean = cleanUrl(url);
   const isYT = isYouTubePage(url);
+  const isMag = isMagnet(url);
   
+  if (isMag) {
+    return await downloadTorrent(url, onProgress, abortSignal);
+  }
+
   const d = new Date();
   const day = d.getDate().toString().padStart(2, '0');
   const h = d.getHours().toString().padStart(2, '0');

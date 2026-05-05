@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { existsSync } from 'fs';
-import { unlink } from 'fs/promises';
+import { unlink, rm } from 'fs/promises';
 import { requireAuth } from './auth.js';
 import { downloadFile } from '../services/downloader.js';
 import { uploadToGDrive, getTodayFolderName } from '../services/gdrive.js';
@@ -101,6 +101,7 @@ router.post('/', async (req, res) => {
   }
 
   let localPath = null;
+  let downloadDir = null;
   try {
     // --- Download phase ---
     sendSSE('status', { phase: 'download', message: 'Starting download…' });
@@ -116,9 +117,16 @@ router.post('/', async (req, res) => {
       cookiesPath = filterCookies(cookiesPath);
     }
 
-    localPath = await downloadFile(url, format, quality, cookiesPath, (line) => {
+    const downloadResult = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });
     }, signal, isLive);
+
+    if (typeof downloadResult === 'string') {
+      localPath = downloadResult;
+    } else {
+      localPath = downloadResult.zipPath;
+      downloadDir = downloadResult.downloadDir;
+    }
 
     // --- Upload phase ---
     sendSSE('status', { phase: 'upload', message: 'Uploading to Google Drive…' });
@@ -135,7 +143,9 @@ router.post('/', async (req, res) => {
     }, signal);
 
     // --- Cleanup ---
-    await unlink(localPath);
+    if (localPath) await unlink(localPath);
+    if (downloadDir) await rm(downloadDir, { recursive: true, force: true });
+    
     localPath = null;
 
     const result = {
@@ -160,6 +170,9 @@ router.post('/', async (req, res) => {
 
     if (localPath) {
       try { await unlink(localPath); } catch (_) {}
+    }
+    if (downloadDir) {
+      try { await rm(downloadDir, { recursive: true, force: true }); } catch (_) {}
     }
 
     sendSSE('error', { message: err.message });
