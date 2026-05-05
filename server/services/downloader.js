@@ -270,10 +270,11 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const isYT = isYouTubePage(url);
   
   const d = new Date();
-  const h = d.getHours() % 12 || 12;
+  const day = d.getDate().toString().padStart(2, '0');
+  const h = d.getHours().toString().padStart(2, '0');
   const m = d.getMinutes().toString().padStart(2, '0');
   const s = d.getSeconds().toString().padStart(2, '0');
-  const baseName = `${h}${m}${s}`;
+  const baseName = `${day}${h}${m}${s}`;
   
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
