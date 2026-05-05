@@ -78,7 +78,7 @@ router.post('/cancel', (req, res) => {
  *   quality — 'best' | '1080' | '720' | '480' | '360' | 'worst'
  */
 router.post('/', async (req, res) => {
-  const { url, format = 'video', quality = 'best' } = req.body;
+  const { url, format = 'video', quality = 'best', isLive = false } = req.body;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'A valid URL is required.' });
@@ -118,7 +118,7 @@ router.post('/', async (req, res) => {
 
     localPath = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });
-    }, signal);
+    }, signal, isLive);
 
     // --- Upload phase ---
     sendSSE('status', { phase: 'upload', message: 'Uploading to Google Drive…' });

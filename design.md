@@ -7,7 +7,7 @@
 - **Google Drive Integration**: Official `googleapis` npm package.
 - **File Downloading**: 
   - **Direct/Raw URLs**: A dedicated Node.js downloader library (e.g., `node-downloader-helper` or `multi-part-downloader`) configured for concurrent multi-part downloading to handle large 1GB+ files efficiently without custom manual chunk merging.
-  - **YouTube URLs**: Integration with `yt-dlp` executable (via a wrapper like `youtube-dl-exec`). The binary will be downloaded automatically via a custom script (`scripts/download-yt-dlp.js`) for the correct OS and ignored in `.gitignore`.
+  - **YouTube URLs**: Integration with `yt-dlp` executable (via a wrapper like `youtube-dl-exec`). Supports specialized flags for live stream downloads. The binary is managed automatically.
 - **Real-Time Progress**: Server-Sent Events (SSE) or a polling endpoint to send download/upload progress (bytes, total, speed) to the frontend.
 - **Versioning**: The server exposes its version from `package.json`. The Vite frontend embeds the version using `import.meta.env.VITE_APP_VERSION`.
 

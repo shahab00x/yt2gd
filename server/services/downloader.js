@@ -263,7 +263,7 @@ function isYouTubePage(url) {
 /**
  * Download a URL using the best method available.
  */
-export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null) {
+export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false) {
   ensureTmpDir();
 
   const clean = cleanUrl(url);
@@ -316,6 +316,14 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     socketTimeout: 120,
     noCheckCertificates: true,
     geoBypass: true,
+    // Workaround for ended live streams and preventing sticking on active ones
+    ...(isLive ? {
+      liveFromStart: true,
+      noPart: true,
+      waitVideo: 10,
+    } : {
+      matchFilters: '!is_live', // Reject active live streams to prevent getting stuck
+    }),
   };
 
   if (cookiesPath && existsSync(cookiesPath)) {

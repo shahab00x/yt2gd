@@ -124,6 +124,10 @@ export async function renderDashboard(username, onNavigate) {
                   <option value="worst">Lowest</option>
                 </select>
               </div>
+              <div class="form-group" style="margin:0; display:flex; align-items:center; gap:8px; padding-top:20px;">
+                <input type="checkbox" id="yt-live" style="width:18px; height:18px; cursor:pointer;" />
+                <label for="yt-live" style="font-size:0.82rem; cursor:pointer; user-select:none; margin-bottom:0;">Live Mode</label>
+              </div>
             </div>
             <p class="hint" style="margin-top:8px;">🍪 Cookies will be used automatically if uploaded in Settings.</p>
           </div>
@@ -206,6 +210,7 @@ export async function renderDashboard(username, onNavigate) {
 
     const format = document.getElementById('yt-format')?.value || 'video';
     const quality = document.getElementById('yt-quality')?.value || 'best';
+    const isLive = document.getElementById('yt-live')?.checked || false;
 
     // Reset UI
     activeTransfer = true;
@@ -288,7 +293,7 @@ export async function renderDashboard(username, onNavigate) {
 
     // Now fire the actual request (non-blocking — progress comes through SSE)
     try {
-      await api.transfer(url, format, quality);
+      await api.transfer(url, format, quality, isLive);
     } catch (err) {
       if (!transferComplete) {
         activeTransfer = false;

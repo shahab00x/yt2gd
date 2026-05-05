@@ -25,3 +25,7 @@
 - **The system shall** ensure a subfolder with the formatted date exists within the "yt2gd" folder.
 - **The system shall** upload the downloaded file into the respective date subfolder on Google Drive.
 - **When** the upload is successfully completed, **the system shall** remove the temporary downloaded file from the server.
+
+## Live Stream Support
+- **When** the user enables "Live Stream Mode", **the system shall** utilize specific `yt-dlp` flags (`--live-from-start`, `--no-part`, `--wait-for-video`) to download recently ended live streams.
+- **The system shall** allow the user to choose between audio and video formats for live stream downloads.
