@@ -320,7 +320,7 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     ...(isLive ? {
       liveFromStart: true,
       noPart: true,
-      waitVideo: 10,
+      waitForVideo: 10,
     } : {
       matchFilters: '!is_live', // Reject active live streams to prevent getting stuck
     }),
