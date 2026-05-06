@@ -20,7 +20,8 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(session({
   secret: 'yt2gd-super-secret-key-change-in-prod',
   resave: false,
@@ -40,6 +41,16 @@ if (existsSync(clientDistPath)) {
     res.sendFile(join(clientDistPath, 'index.html'));
   });
 }
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('[SERVER ERROR]', {
+    message: err.message,
+    stack: err.stack,
+    status: err.status
+  });
+  res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
+});
 
 app.listen(PORT, () => {
   console.log(`✅ yt2gd server running on http://localhost:${PORT}`);

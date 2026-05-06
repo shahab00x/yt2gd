@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 /**
  * Thin API client that wraps fetch calls.
  * Always sends cookies (session) with each request.
@@ -39,23 +41,22 @@ export const api = {
   uploadCookies: async (file) => {
     const formData = new FormData();
     formData.append('cookies', file);
-    console.log(`[API] Fetching ${BASE}/auth/cookies...`);
+    console.log(`[API] Uploading via Axios to ${BASE}/auth/cookies...`);
     try {
-      const res = await fetch(`${BASE}/auth/cookies`, {
-        method: 'POST',
-        credentials: 'include',
-        body: formData,
+      const res = await axios.post(`${BASE}/auth/cookies`, formData, {
+        withCredentials: true,
+        timeout: 60000,
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
       });
-      console.log(`[API] Fetch response received. Status: ${res.status} ${res.statusText}`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.error('[API] Upload failed server-side:', data.error || `HTTP ${res.status}`);
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      return data;
+      console.log(`[API] Axios response received. Status: ${res.status}`);
+      return res.data;
     } catch (err) {
-      console.error('[API] Fetch network/parsing error:', err);
-      throw err;
+      const status = err.response ? err.response.status : 'Network/Timeout';
+      const errorMsg = err.response && err.response.data ? err.response.data.error : err.message;
+      console.error(`[API] Axios upload error (Status ${status}):`, errorMsg);
+      throw new Error(errorMsg);
     }
   },
 
