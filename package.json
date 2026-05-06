@@ -4,9 +4,9 @@
   "description": "Download a file from a URL and upload it to Google Drive.",
   "type": "module",
   "scripts": {
-    "dev": "node server/index.js",
+    "dev": "NODE_OPTIONS=\"--max-http-header-size=32768\" node server/index.js",
     "build:client": "cd client && npm run build",
-    "start": "node server/index.js",
+    "start": "NODE_OPTIONS=\"--max-http-header-size=32768\" node server/index.js",
     "postinstall": "node scripts/download-yt-dlp.js"
   },
   "dependencies": {
