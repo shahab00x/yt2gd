@@ -52,6 +52,16 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ yt2gd server running on http://localhost:${PORT}`);
+});
+
+// Capture low-level Node.js HTTP errors (happens before Express)
+server.on('clientError', (err, socket) => {
+  console.error('[HTTP SERVER ERROR] Client Error:', err.message, 'Code:', err.code);
+  if (err.code === 'HPE_HEADER_OVERFLOW' || err.code === 'HPE_INVALID_HEADER_TOKEN') {
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  } else {
+    socket.destroy(err);
+  }
 });

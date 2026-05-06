@@ -194,6 +194,8 @@ export function renderSettings(username, onNavigate) {
     cookiesUploadBtn.innerHTML = '<span class="spinner"></span>';
     console.log('[SETTINGS] Reading file as text for JSON upload:', file.name, 'size:', file.size);
     try {
+      const text = await file.text();
+      console.log('[SETTINGS] File start:', text.substring(0, 100));
       await api.uploadCookies(file);
       console.log('[SETTINGS] Cookie upload successful.');
       setCookiesStatus(true);
