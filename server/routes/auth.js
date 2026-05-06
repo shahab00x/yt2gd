@@ -5,18 +5,14 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
-import { readFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import { loadSettings, updateGdriveSettings, updateCookiesPath } from '../services/settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Cookies file upload — store directly in project root, gitignored
-const cookiesStorage = multer.diskStorage({
-  destination: join(__dirname, '../../'),
-  filename: (req, file, cb) => cb(null, 'cookies.txt'),
-});
-const uploadCookies = multer({ storage: cookiesStorage });
+// Cookies file upload — use memory storage to avoid locking issues during stream parsing
+const uploadCookies = multer({ storage: multer.memoryStorage() });
 
 const router = Router();
 
@@ -118,13 +114,23 @@ router.post('/cookies', requireAuth, (req, res, next) => {
     console.log('[AUTH] Multer finished parsing. req.file:', req.file ? 'exists' : 'missing');
     next();
   });
-}, (req, res) => {
+}, async (req, res) => {
   if (!req.file) {
+    console.error('[AUTH] No file received by handler.');
     return res.status(400).json({ error: 'No file uploaded.' });
   }
-  const cookiesPath = req.file.path;
-  updateCookiesPath(cookiesPath);
-  res.json({ success: true, message: 'cookies.txt saved.' });
+
+  const cookiesPath = join(__dirname, '../../cookies.txt');
+  try {
+    console.log(`[AUTH] Writing ${req.file.size} bytes to ${cookiesPath}`);
+    await writeFile(cookiesPath, req.file.buffer);
+    updateCookiesPath(cookiesPath);
+    console.log('[AUTH] cookies.txt saved successfully.');
+    res.json({ success: true, message: 'cookies.txt saved.' });
+  } catch (err) {
+    console.error('[AUTH] File write error:', err);
+    res.status(500).json({ error: `Failed to save cookies: ${err.message}` });
+  }
 });
 
 /**

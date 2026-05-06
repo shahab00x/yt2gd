@@ -1,4 +1,12 @@
 import './style.css';
+
+// Global error tracking
+window.onerror = (msg, url, line, col, error) => {
+  console.error('[GLOBAL ERROR]', { msg, url, line, col, error });
+};
+window.onunhandledrejection = (event) => {
+  console.error('[UNHANDLED REJECTION]', event.reason);
+};
 import { api } from './api.js';
 import { renderLogin } from './views/login.js';
 import { renderDashboard } from './views/dashboard.js';

@@ -13,7 +13,13 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+// Global request logger for debugging
+app.use((req, res, next) => {
+  console.log(`[SERVER] Incoming request: ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(session({
   secret: 'yt2gd-super-secret-key-change-in-prod',

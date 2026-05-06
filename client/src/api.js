@@ -39,14 +39,24 @@ export const api = {
   uploadCookies: async (file) => {
     const formData = new FormData();
     formData.append('cookies', file);
-    const res = await fetch(`${BASE}/auth/cookies`, {
-      method: 'POST',
-      credentials: 'include',
-      body: formData,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
+    console.log(`[API] Fetching ${BASE}/auth/cookies...`);
+    try {
+      const res = await fetch(`${BASE}/auth/cookies`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      console.log(`[API] Fetch response received. Status: ${res.status} ${res.statusText}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error('[API] Upload failed server-side:', data.error || `HTTP ${res.status}`);
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      return data;
+    } catch (err) {
+      console.error('[API] Fetch network/parsing error:', err);
+      throw err;
+    }
   },
 
   /**

@@ -192,10 +192,10 @@ export function renderSettings(username, onNavigate) {
 
     cookiesUploadBtn.disabled = true;
     cookiesUploadBtn.innerHTML = '<span class="spinner"></span>';
-    cookiesResult.style.display = 'none';
-
+    console.log('[SETTINGS] Cookie upload initiated for file:', file.name, 'size:', file.size);
     try {
       await api.uploadCookies(file);
+      console.log('[SETTINGS] Cookie upload successful.');
       setCookiesStatus(true);
       cookiesResult.className = 'alert alert-success';
       cookiesResult.textContent = '✅ cookies.txt uploaded successfully.';
