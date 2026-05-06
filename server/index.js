@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import session from 'express-session';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
@@ -52,7 +53,9 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
 });
 
-const server = app.listen(PORT, () => {
+const server = http.createServer(app);
+
+server.listen(PORT, () => {
   console.log(`✅ yt2gd server running on http://localhost:${PORT}`);
 });
 

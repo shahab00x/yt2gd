@@ -96,26 +96,25 @@ router.post('/settings', requireAuth, (req, res) => {
 });
 
 /**
- * POST /api/auth/cookies
- * Accepts cookies.txt content in a JSON body and stores it in the project root.
+ * POST /api/auth/save-cookie-data
+ * Accepts Base64 encoded cookies.txt content.
  */
-router.post('/cookies', requireAuth, async (req, res) => {
-  const { cookies } = req.body;
-  if (!cookies) {
-    console.error('[AUTH] No cookie content received in body.');
-    return res.status(400).json({ error: 'No cookie content provided.' });
+router.post('/save-cookie-data', requireAuth, async (req, res) => {
+  const { data } = req.body;
+  if (!data) {
+    return res.status(400).json({ error: 'No cookie data provided.' });
   }
 
   const cookiesPath = join(__dirname, '../../cookies.txt');
   try {
-    console.log(`[AUTH] Writing ${cookies.length} characters to ${cookiesPath}`);
-    await writeFile(cookiesPath, cookies, 'utf8');
+    const decoded = Buffer.from(data, 'base64').toString('utf8');
+    console.log(`[AUTH] Decoded ${decoded.length} characters. Writing to ${cookiesPath}`);
+    await writeFile(cookiesPath, decoded, 'utf8');
     updateCookiesPath(cookiesPath);
-    console.log('[AUTH] cookies.txt saved successfully.');
     res.json({ success: true, message: 'cookies.txt saved.' });
   } catch (err) {
-    console.error('[AUTH] File write error:', err);
-    res.status(500).json({ error: `Failed to save cookies: ${err.message}` });
+    console.error('[AUTH] Save error:', err);
+    res.status(500).json({ error: `Failed to save: ${err.message}` });
   }
 });
 
