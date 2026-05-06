@@ -103,7 +103,22 @@ router.post('/settings', requireAuth, (req, res) => {
  * POST /api/auth/cookies
  * Accepts a cookies.txt file upload and stores it in the project root.
  */
-router.post('/cookies', requireAuth, uploadCookies.single('cookies'), (req, res) => {
+router.post('/cookies', requireAuth, (req, res, next) => {
+  console.log(`[AUTH] Received POST /api/auth/cookies request. Content-Type: ${req.headers['content-type']}, Content-Length: ${req.headers['content-length']}`);
+  next();
+}, (req, res, next) => {
+  uploadCookies.single('cookies')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      console.error('[AUTH] Multer Error:', err);
+      return res.status(500).json({ error: `Upload error: ${err.message}` });
+    } else if (err) {
+      console.error('[AUTH] Unknown Upload Error:', err);
+      return res.status(500).json({ error: `Unknown upload error: ${err.message}` });
+    }
+    console.log('[AUTH] Multer finished parsing. req.file:', req.file ? 'exists' : 'missing');
+    next();
+  });
+}, (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded.' });
   }
