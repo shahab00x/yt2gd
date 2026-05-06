@@ -97,33 +97,19 @@ router.post('/settings', requireAuth, (req, res) => {
 
 /**
  * POST /api/auth/cookies
- * Accepts a cookies.txt file upload and stores it in the project root.
+ * Accepts cookies.txt content in a JSON body and stores it in the project root.
  */
-router.post('/cookies', requireAuth, (req, res, next) => {
-  console.log(`[AUTH] Received POST /api/auth/cookies request. Content-Type: ${req.headers['content-type']}, Content-Length: ${req.headers['content-length']}`);
-  next();
-}, (req, res, next) => {
-  uploadCookies.single('cookies')(req, res, (err) => {
-    if (err instanceof multer.MulterError) {
-      console.error('[AUTH] Multer Error:', err);
-      return res.status(500).json({ error: `Upload error: ${err.message}` });
-    } else if (err) {
-      console.error('[AUTH] Unknown Upload Error:', err);
-      return res.status(500).json({ error: `Unknown upload error: ${err.message}` });
-    }
-    console.log('[AUTH] Multer finished parsing. req.file:', req.file ? 'exists' : 'missing');
-    next();
-  });
-}, async (req, res) => {
-  if (!req.file) {
-    console.error('[AUTH] No file received by handler.');
-    return res.status(400).json({ error: 'No file uploaded.' });
+router.post('/cookies', requireAuth, async (req, res) => {
+  const { cookies } = req.body;
+  if (!cookies) {
+    console.error('[AUTH] No cookie content received in body.');
+    return res.status(400).json({ error: 'No cookie content provided.' });
   }
 
   const cookiesPath = join(__dirname, '../../cookies.txt');
   try {
-    console.log(`[AUTH] Writing ${req.file.size} bytes to ${cookiesPath}`);
-    await writeFile(cookiesPath, req.file.buffer);
+    console.log(`[AUTH] Writing ${cookies.length} characters to ${cookiesPath}`);
+    await writeFile(cookiesPath, cookies, 'utf8');
     updateCookiesPath(cookiesPath);
     console.log('[AUTH] cookies.txt saved successfully.');
     res.json({ success: true, message: 'cookies.txt saved.' });

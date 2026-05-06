@@ -39,23 +39,20 @@ export const api = {
    * Upload a cookies.txt file (multipart/form-data).
    */
   uploadCookies: async (file) => {
-    const formData = new FormData();
-    formData.append('cookies', file);
-    console.log(`[API] Uploading via Axios to ${BASE}/auth/cookies...`);
+    console.log(`[API] Reading cookie file as text: ${file.name}`);
+    const text = await file.text();
+    console.log(`[API] Sending ${text.length} bytes of cookie data via JSON...`);
     try {
-      const res = await axios.post(`${BASE}/auth/cookies`, formData, {
+      const res = await axios.post(`${BASE}/auth/cookies`, { cookies: text }, {
         withCredentials: true,
-        timeout: 60000,
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
+        timeout: 60000
       });
       console.log(`[API] Axios response received. Status: ${res.status}`);
       return res.data;
     } catch (err) {
       const status = err.response ? err.response.status : 'Network/Timeout';
       const errorMsg = err.response && err.response.data ? err.response.data.error : err.message;
-      console.error(`[API] Axios upload error (Status ${status}):`, errorMsg);
+      console.error(`[API] Cookie upload error (Status ${status}):`, errorMsg);
       throw new Error(errorMsg);
     }
   },
