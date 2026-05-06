@@ -21,6 +21,14 @@ export default defineConfig({
         secure: false,
         timeout: 60000,
         proxyTimeout: 60000,
+        configure: (proxy, options) => {
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            // Ensure large request bodies are forwarded
+            if (req.headers['content-length']) {
+              proxyReq.setHeader('Content-Length', req.headers['content-length']);
+            }
+          });
+        }
       }
     }
   }
