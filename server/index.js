@@ -1,5 +1,4 @@
 import express from 'express';
-import http from 'http';
 import session from 'express-session';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
@@ -53,22 +52,6 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
 });
 
-const server = http.createServer(app);
-
-server.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`✅ yt2gd server running on http://localhost:${PORT}`);
-});
-
-// Capture low-level Node.js HTTP errors (happens before Express)
-server.on('clientError', (err, socket) => {
-  console.error('[HTTP SERVER ERROR] Client Error:', err.message, 'Code:', err.code);
-  if (err.code === 'HPE_HEADER_OVERFLOW' || err.code === 'HPE_INVALID_HEADER_TOKEN') {
-    socket.write('HTTP/1.1 400 Bad Request\r\n');
-    socket.write('Content-Type: application/json\r\n');
-    socket.write('Connection: close\r\n');
-    socket.write('\r\n');
-    socket.end(JSON.stringify({ error: 'Request header too large or invalid' }));
-  } else {
-    socket.destroy(err);
-  }
 });

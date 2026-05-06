@@ -11,8 +11,12 @@ import { loadSettings, updateGdriveSettings, updateCookiesPath } from '../servic
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Cookies file upload — use memory storage to avoid locking issues during stream parsing
-const uploadCookies = multer({ storage: multer.memoryStorage() });
+// Cookies file upload — store directly in project root, gitignored
+const cookiesStorage = multer.diskStorage({
+  destination: join(__dirname, '../../'),
+  filename: (req, file, cb) => cb(null, 'cookies.txt'),
+});
+const uploadCookies = multer({ storage: cookiesStorage });
 
 const router = Router();
 
@@ -96,26 +100,16 @@ router.post('/settings', requireAuth, (req, res) => {
 });
 
 /**
- * POST /api/auth/save-cookie-data
- * Accepts Base64 encoded cookies.txt content.
+ * POST /api/auth/cookies
+ * Accepts a cookies.txt file upload and stores it in the project root.
  */
-router.post('/save-cookie-data', requireAuth, async (req, res) => {
-  const { data } = req.body;
-  if (!data) {
-    return res.status(400).json({ error: 'No cookie data provided.' });
+router.post('/cookies', requireAuth, uploadCookies.single('cookies'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
   }
-
-  const cookiesPath = join(__dirname, '../../cookies.txt');
-  try {
-    const decoded = Buffer.from(data, 'base64').toString('utf8');
-    console.log(`[AUTH] Decoded ${decoded.length} characters. Writing to ${cookiesPath}`);
-    await writeFile(cookiesPath, decoded, 'utf8');
-    updateCookiesPath(cookiesPath);
-    res.json({ success: true, message: 'cookies.txt saved.' });
-  } catch (err) {
-    console.error('[AUTH] Save error:', err);
-    res.status(500).json({ error: `Failed to save: ${err.message}` });
-  }
+  const cookiesPath = req.file.path;
+  updateCookiesPath(cookiesPath);
+  res.json({ success: true, message: 'cookies.txt saved.' });
 });
 
 /**

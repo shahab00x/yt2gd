@@ -39,24 +39,16 @@ export const api = {
    * Upload a cookies.txt file (multipart/form-data).
    */
   uploadCookies: async (file) => {
-    console.log(`[API] Reading cookie file: ${file.name}`);
-    const text = await file.text();
-    // Base64 encode to bypass sensitive-data filters (WAFs)
-    const encoded = btoa(unescape(encodeURIComponent(text)));
-    console.log(`[API] Sending ${encoded.length} Base64 characters to /auth/save-cookie-data...`);
-    
-    try {
-      const res = await axios.post(`${BASE}/auth/save-cookie-data`, { data: encoded }, {
-        withCredentials: true,
-        timeout: 60000
-      });
-      return res.data;
-    } catch (err) {
-      const status = err.response ? err.response.status : 'Network/Timeout';
-      const errorMsg = err.response && err.response.data ? err.response.data.error : err.message;
-      console.error(`[API] Cookie upload error (Status ${status}):`, errorMsg);
-      throw new Error(errorMsg);
-    }
+    const formData = new FormData();
+    formData.append('cookies', file);
+    const res = await fetch(`${BASE}/auth/cookies`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
   },
 
   /**
