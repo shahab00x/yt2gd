@@ -17,7 +17,7 @@
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "googleapis": "^140.0.0",
-    "multer": "^2.1.1",
+    "multer": "^1.4.5-lts.1",
     "node-downloader-helper": "^2.1.11",
     "progress-stream": "^2.0.0",
     "webtorrent": "^1.9.7",
