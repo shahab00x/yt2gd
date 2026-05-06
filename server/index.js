@@ -20,8 +20,8 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(session({
   secret: 'yt2gd-super-secret-key-change-in-prod',
   resave: false,

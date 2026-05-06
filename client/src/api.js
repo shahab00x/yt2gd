@@ -41,19 +41,34 @@ export const api = {
   uploadCookies: async (file) => {
     console.log(`[API] Reading cookie file as text: ${file.name}`);
     const text = await file.text();
-    console.log(`[API] Sending ${text.length} bytes of cookie data via JSON...`);
+    
+    // Direct bypass: Try to hit port 3000 directly to avoid proxy issues
+    const { hostname, protocol } = window.location;
+    const directUrl = `${protocol}//${hostname}:3000${BASE}/auth/cookies`;
+    
+    console.log(`[API] Sending ${text.length} bytes via DIRECT upload to ${directUrl}...`);
     try {
-      const res = await axios.post(`${BASE}/auth/cookies`, { cookies: text }, {
+      const res = await axios.post(directUrl, { cookies: text }, {
         withCredentials: true,
-        timeout: 60000
+        timeout: 120000
       });
-      console.log(`[API] Axios response received. Status: ${res.status}`);
+      console.log(`[API] Direct upload successful. Status: ${res.status}`);
       return res.data;
     } catch (err) {
-      const status = err.response ? err.response.status : 'Network/Timeout';
-      const errorMsg = err.response && err.response.data ? err.response.data.error : err.message;
-      console.error(`[API] Cookie upload error (Status ${status}):`, errorMsg);
-      throw new Error(errorMsg);
+      console.warn('[API] Direct upload failed, falling back to proxy...', err.message);
+      // Fallback to proxy if direct fails (e.g. port 3000 not exposed)
+      try {
+        const res = await axios.post(`${BASE}/auth/cookies`, { cookies: text }, {
+          withCredentials: true,
+          timeout: 60000
+        });
+        return res.data;
+      } catch (proxyErr) {
+        const status = proxyErr.response ? proxyErr.response.status : 'Network/Timeout';
+        const errorMsg = proxyErr.response && proxyErr.response.data ? proxyErr.response.data.error : proxyErr.message;
+        console.error(`[API] Cookie upload error (Status ${status}):`, errorMsg);
+        throw new Error(errorMsg);
+      }
     }
   },
 
