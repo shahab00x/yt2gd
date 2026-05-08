@@ -179,6 +179,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
 
   // Get all files in the directory
   const files = await readdir(dirPath);
+  console.log(`📂 Found ${files.length} items in directory`);
   const totalFiles = files.length;
   let uploadedFiles = 0;
   let totalSize = 0;
@@ -193,6 +194,8 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
       }
     } catch (_) {}
   }
+
+  console.log(`📊 Total size to upload: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
 
   let totalUploaded = 0;
   const startTime = Date.now();
@@ -246,9 +249,11 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
           parents: [torrentFolder.data.id]
         },
         media: { body },
-        fields: 'id',
+        fields: 'id'
+      }, {
         signal: abortSignal
       });
+      console.log(`✅ Uploaded "${file}" successfully`);
       uploadedFiles++;
       totalUploaded += fileSize;
       
@@ -264,6 +269,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
         });
       }
     } catch (err) {
+      console.error(`❌ Failed to upload "${file}":`, err.message);
       if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
       throw err;
     } finally {
