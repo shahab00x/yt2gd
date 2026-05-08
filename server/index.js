@@ -4,6 +4,7 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
+import { clearTmp } from './services/downloader.js';
 import authRoutes from './routes/auth.js';
 import transferRoutes from './routes/transfer.js';
 
@@ -51,6 +52,9 @@ app.use((err, req, res, next) => {
   });
   res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
 });
+
+// Clear tmp directory on startup
+clearTmp();
 
 app.listen(PORT, () => {
   console.log(`✅ yt2gd server running on http://localhost:${PORT}`);

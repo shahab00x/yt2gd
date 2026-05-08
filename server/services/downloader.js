@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, basename } from 'path';
 import { create } from 'youtube-dl-exec';
@@ -13,6 +13,21 @@ export const TMP_DIR = join(__dirname, '../../tmp');
 
 function ensureTmpDir() {
   if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
+}
+
+/**
+ * Clear the tmp directory to reclaim space.
+ */
+export function clearTmp() {
+  console.log(`🧹 Clearing temporary directory: ${TMP_DIR}`);
+  try {
+    if (existsSync(TMP_DIR)) {
+      rmSync(TMP_DIR, { recursive: true, force: true });
+    }
+    ensureTmpDir();
+  } catch (err) {
+    console.warn(`⚠️ Failed to clear tmp directory: ${err.message}`);
+  }
 }
 
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';

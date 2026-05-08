@@ -81,6 +81,36 @@ async function findOrCreateFolder(drive, name, parentId = null) {
 }
 
 /**
+ * Ensure a directory path exists on Google Drive, creating subfolders as needed.
+ * @param {object} drive - Google Drive client instance.
+ * @param {string} relativePath - The path relative to root (e.g. "Season 1/Episodes").
+ * @param {string} rootParentId - The starting parent folder ID.
+ * @param {object} folderCache - Cache for folder IDs to avoid redundant API calls.
+ */
+async function ensureFolderStructure(drive, relativePath, rootParentId, folderCache) {
+  if (!relativePath || relativePath === '.' || relativePath === '/') {
+    return rootParentId;
+  }
+
+  const parts = relativePath.split('/').filter(p => p);
+  let currentParentId = rootParentId;
+  let pathAcc = "";
+
+  for (const part of parts) {
+    pathAcc = pathAcc ? `${pathAcc}/${part}` : part;
+    if (folderCache[pathAcc]) {
+      // console.log(`  📁 Folder cache hit: ${pathAcc}`);
+      currentParentId = folderCache[pathAcc];
+    } else {
+      console.log(`  📂 Ensuring subfolder exists: ${pathAcc}`);
+      currentParentId = await findOrCreateFolder(drive, part, currentParentId);
+      folderCache[pathAcc] = currentParentId;
+    }
+  }
+  return currentParentId;
+}
+
+/**
  * Get the "Month_Day" date folder name for today.
  * e.g. "May_1"
  */
@@ -145,14 +175,22 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
 
   try {
     const res = await drive.files.create({
+      uploadType: 'resumable',
       requestBody: {
         name: fileName,
         parents: [dateFolderId]
       },
-      media: { body },
+      media: {
+        body,
+      },
       fields: 'id, name, webViewLink'
     }, {
-      signal: abortSignal // Pass the abort signal directly to googleapis
+      signal: abortSignal,
+      // Resumable uploads are much more robust for large files
+      onUploadProgress: (evt) => {
+        // Option 1: use library's native progress if needed
+        // but we already use progress-stream (prog) which is more precise for streams
+      }
     });
 
     console.log(`✅ Uploaded "${fileName}" → Drive ID: ${res.data.id}`);
@@ -216,6 +254,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
 
   let totalUploaded = 0;
   const startTime = Date.now();
+  const folderCache = {}; // Cache for subfolder IDs
 
   // Upload each file
   for (const filePath of allFilePaths) {
@@ -226,10 +265,16 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     const stats = statSync(filePath);
     const fileSize = stats.size;
     
-    // Get relative path for the filename (preserve directory structure in filename)
+    // Get relative path for the filename (preserve directory structure)
+    // On Windows, dirPath might have backslashes, normalize to forward slashes for Drive logic
     const relativePath = filePath.replace(dirPath + sep, '').replace(/\\/g, '/');
-    const fileName = basename(relativePath);
+    const pathParts = relativePath.split('/');
+    const fileName = pathParts.pop(); // The last part is the file name
+    const subPath = pathParts.join('/'); // The rest is the folder path
     
+    // Ensure the subfolder structure exists on Drive
+    const targetFolderId = await ensureFolderStructure(drive, subPath, torrentFolder.data.id, folderCache);
+
     console.log(`⬆️  Uploading "${relativePath}" (${(fileSize / 1024 / 1024).toFixed(2)} MB) [${uploadedFiles + 1}/${totalFiles}]`);
 
     // Wrap the read stream with progress tracking
@@ -262,11 +307,14 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
 
     try {
       await drive.files.create({
+        uploadType: 'resumable',
         requestBody: {
           name: fileName,
-          parents: [torrentFolder.data.id]
+          parents: [targetFolderId]
         },
-        media: { body },
+        media: {
+          body,
+        },
         fields: 'id'
       }, {
         signal: abortSignal
@@ -288,6 +336,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
       }
     } catch (err) {
       console.error(`❌ Failed to upload "${relativePath}":`, err.message);
+      // We should probably fail the whole transfer if a file fails to ensure integrity
       if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
       throw err;
     } finally {
