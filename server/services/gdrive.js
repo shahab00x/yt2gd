@@ -1,9 +1,29 @@
 import { google } from 'googleapis';
 import { createReadStream, statSync } from 'fs';
 import { readdir } from 'fs/promises';
-import { basename, join } from 'path';
+import { basename, join, sep } from 'path';
 import { loadSettings } from './settings.js';
 import progressStream from 'progress-stream';
+
+/**
+ * Recursively get all files in a directory.
+ */
+async function getAllFiles(dirPath, fileList = []) {
+  const files = await readdir(dirPath);
+  
+  for (const file of files) {
+    const filePath = join(dirPath, file);
+    const stats = statSync(filePath);
+    
+    if (stats.isDirectory()) {
+      await getAllFiles(filePath, fileList);
+    } else if (stats.isFile()) {
+      fileList.push(filePath);
+    }
+  }
+  
+  return fileList;
+}
 
 /**
  * Create an authorized Google Drive OAuth2 client from stored settings.
@@ -177,21 +197,18 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   
   console.log(`📁 Created folder "${folderName}" (${torrentFolder.data.id})`);
 
-  // Get all files in the directory
-  const files = await readdir(dirPath);
-  console.log(`📂 Found ${files.length} items in directory`);
-  const totalFiles = files.length;
+  // Recursively get all files in the directory
+  const allFilePaths = await getAllFiles(dirPath);
+  console.log(`📂 Found ${allFilePaths.length} files in directory (recursive)`);
+  const totalFiles = allFilePaths.length;
   let uploadedFiles = 0;
   let totalSize = 0;
   
   // Calculate total size
-  for (const file of files) {
-    const filePath = join(dirPath, file);
+  for (const filePath of allFilePaths) {
     try {
       const stats = statSync(filePath);
-      if (stats.isFile()) {
-        totalSize += stats.size;
-      }
+      totalSize += stats.size;
     } catch (_) {}
   }
 
@@ -201,18 +218,19 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   const startTime = Date.now();
 
   // Upload each file
-  for (const file of files) {
+  for (const filePath of allFilePaths) {
     if (abortSignal?.aborted) {
       throw new Error('Upload was cancelled by user.');
     }
 
-    const filePath = join(dirPath, file);
     const stats = statSync(filePath);
-    
-    if (!stats.isFile()) continue;
-
     const fileSize = stats.size;
-    console.log(`⬆️  Uploading "${file}" (${(fileSize / 1024 / 1024).toFixed(2)} MB) [${uploadedFiles + 1}/${totalFiles}]`);
+    
+    // Get relative path for the filename (preserve directory structure in filename)
+    const relativePath = filePath.replace(dirPath + sep, '').replace(/\\/g, '/');
+    const fileName = basename(relativePath);
+    
+    console.log(`⬆️  Uploading "${relativePath}" (${(fileSize / 1024 / 1024).toFixed(2)} MB) [${uploadedFiles + 1}/${totalFiles}]`);
 
     // Wrap the read stream with progress tracking
     const prog = progressStream({ length: fileSize, time: 500 });
@@ -227,7 +245,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
           total: totalSize,
           speed,
           percent,
-          currentFile: file,
+          currentFile: relativePath,
           currentFileProgress: (data.transferred / fileSize) * 100
         });
       }
@@ -237,7 +255,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     const body = rawStream.pipe(prog);
 
     const onAbort = () => {
-      console.log(`🛑 Upload cancelled for ${file}`);
+      console.log(`🛑 Upload cancelled for ${relativePath}`);
       rawStream.destroy();
     };
     if (abortSignal) abortSignal.addEventListener('abort', onAbort);
@@ -245,7 +263,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     try {
       await drive.files.create({
         requestBody: {
-          name: file,
+          name: fileName,
           parents: [torrentFolder.data.id]
         },
         media: { body },
@@ -253,7 +271,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
       }, {
         signal: abortSignal
       });
-      console.log(`✅ Uploaded "${file}" successfully`);
+      console.log(`✅ Uploaded "${relativePath}" successfully`);
       uploadedFiles++;
       totalUploaded += fileSize;
       
@@ -264,12 +282,12 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
           total: totalSize,
           speed,
           percent: (totalUploaded / totalSize) * 100,
-          currentFile: file,
+          currentFile: relativePath,
           currentFileProgress: 100
         });
       }
     } catch (err) {
-      console.error(`❌ Failed to upload "${file}":`, err.message);
+      console.error(`❌ Failed to upload "${relativePath}":`, err.message);
       if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
       throw err;
     } finally {
