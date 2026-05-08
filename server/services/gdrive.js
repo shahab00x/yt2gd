@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { createReadStream, statSync } from 'fs';
-import { basename } from 'path';
+import { readdir } from 'fs/promises';
+import { basename, join } from 'path';
 import { loadSettings } from './settings.js';
 import progressStream from 'progress-stream';
 
@@ -142,4 +143,134 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
   } finally {
     if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
   }
+}
+
+/**
+ * Upload a local folder to Google Drive as a folder with individual files.
+ * @param {string} dirPath - Absolute path to the local folder.
+ * @param {string} folderName - Name for the Drive folder.
+ * @param {function} onProgress - Called with { uploaded, total, speed, percent, currentFile }
+ * @param {AbortSignal} abortSignal - Optional signal to abort the upload.
+ * @returns {Promise<object>} - Uploaded folder metadata { id, name, webViewLink }.
+ */
+export async function uploadFolderToGDrive(dirPath, folderName, onProgress = null, abortSignal = null) {
+  const auth = getAuthClient();
+  const drive = google.drive({ version: 'v3', auth });
+
+  // Ensure yt2gd root folder exists
+  const rootFolderId = await findOrCreateFolder(drive, 'yt2gd', null);
+
+  // Ensure today's date subfolder exists
+  const dateFolderName = getTodayFolderName();
+  const dateFolderId = await findOrCreateFolder(drive, dateFolderName, rootFolderId);
+
+  // Create a new folder for the torrent
+  const torrentFolderMeta = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [dateFolderId]
+  };
+  const torrentFolder = await drive.files.create({
+    requestBody: torrentFolderMeta,
+    fields: 'id, name, webViewLink'
+  });
+  
+  console.log(`📁 Created folder "${folderName}" (${torrentFolder.data.id})`);
+
+  // Get all files in the directory
+  const files = await readdir(dirPath);
+  const totalFiles = files.length;
+  let uploadedFiles = 0;
+  let totalSize = 0;
+  
+  // Calculate total size
+  for (const file of files) {
+    const filePath = join(dirPath, file);
+    try {
+      const stats = statSync(filePath);
+      if (stats.isFile()) {
+        totalSize += stats.size;
+      }
+    } catch (_) {}
+  }
+
+  let totalUploaded = 0;
+  const startTime = Date.now();
+
+  // Upload each file
+  for (const file of files) {
+    if (abortSignal?.aborted) {
+      throw new Error('Upload was cancelled by user.');
+    }
+
+    const filePath = join(dirPath, file);
+    const stats = statSync(filePath);
+    
+    if (!stats.isFile()) continue;
+
+    const fileSize = stats.size;
+    console.log(`⬆️  Uploading "${file}" (${(fileSize / 1024 / 1024).toFixed(2)} MB) [${uploadedFiles + 1}/${totalFiles}]`);
+
+    // Wrap the read stream with progress tracking
+    const prog = progressStream({ length: fileSize, time: 500 });
+    prog.on('progress', (data) => {
+      if (onProgress) {
+        const currentFileUploaded = data.transferred;
+        const uploadedSoFar = totalUploaded + currentFileUploaded;
+        const speed = data.speed;
+        const percent = (uploadedSoFar / totalSize) * 100;
+        onProgress({
+          uploaded: uploadedSoFar,
+          total: totalSize,
+          speed,
+          percent,
+          currentFile: file,
+          currentFileProgress: (data.transferred / fileSize) * 100
+        });
+      }
+    });
+
+    const rawStream = createReadStream(filePath);
+    const body = rawStream.pipe(prog);
+
+    const onAbort = () => {
+      console.log(`🛑 Upload cancelled for ${file}`);
+      rawStream.destroy();
+    };
+    if (abortSignal) abortSignal.addEventListener('abort', onAbort);
+
+    try {
+      await drive.files.create({
+        requestBody: {
+          name: file,
+          parents: [torrentFolder.data.id]
+        },
+        media: { body },
+        fields: 'id',
+        signal: abortSignal
+      });
+      uploadedFiles++;
+      totalUploaded += fileSize;
+      
+      if (onProgress) {
+        const speed = totalUploaded / ((Date.now() - startTime) / 1000);
+        onProgress({
+          uploaded: totalUploaded,
+          total: totalSize,
+          speed,
+          percent: (totalUploaded / totalSize) * 100,
+          currentFile: file,
+          currentFileProgress: 100
+        });
+      }
+    } catch (err) {
+      if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
+      throw err;
+    } finally {
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+    }
+  }
+
+  console.log(`✅ Uploaded ${uploadedFiles} files to folder "${folderName}"`);
+  return torrentFolder.data;
 }

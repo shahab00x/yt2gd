@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { existsSync } from 'fs';
 import { unlink, rm } from 'fs/promises';
+import { basename } from 'path';
 import { requireAuth } from './auth.js';
 import { downloadFile } from '../services/downloader.js';
-import { uploadToGDrive, getTodayFolderName } from '../services/gdrive.js';
+import { uploadToGDrive, uploadFolderToGDrive, getTodayFolderName } from '../services/gdrive.js';
 import { loadSettings } from '../services/settings.js';
 
 const router = Router();
@@ -73,12 +74,13 @@ router.post('/cancel', (req, res) => {
 
 /**
  * POST /api/transfer
- * Body: { url, format?, quality? }
+ * Body: { url, format?, quality?, torrentMode? }
  *   format  — 'video' | 'audio'
  *   quality — 'best' | '1080' | '720' | '480' | '360' | 'worst'
+ *   torrentMode — 'zip' | 'folder' (for magnet links)
  */
 router.post('/', async (req, res) => {
-  const { url, format = 'video', quality = 'best', isLive = false } = req.body;
+  const { url, format = 'video', quality = 'best', isLive = false, torrentMode } = req.body;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'A valid URL is required.' });
@@ -117,30 +119,56 @@ router.post('/', async (req, res) => {
       cookiesPath = filterCookies(cookiesPath);
     }
 
+    // Determine if we should skip zipping for torrents
+    const defaultTorrentMode = settings.torrentMode || 'zip';
+    const effectiveTorrentMode = torrentMode || defaultTorrentMode;
+    const skipZip = effectiveTorrentMode === 'folder';
+
     const downloadResult = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });
-    }, signal, isLive);
+    }, signal, isLive, skipZip);
 
     if (typeof downloadResult === 'string') {
       localPath = downloadResult;
-    } else {
+    } else if (downloadResult.zipPath) {
+      // Zip mode
       localPath = downloadResult.zipPath;
+      downloadDir = downloadResult.downloadDir;
+    } else if (downloadResult.downloadDir) {
+      // Folder mode
       downloadDir = downloadResult.downloadDir;
     }
 
     // --- Upload phase ---
     sendSSE('status', { phase: 'upload', message: 'Uploading to Google Drive…' });
 
-    const fileInfo = await uploadToGDrive(localPath, ({ uploaded, total, speed, percent }) => {
-      sendSSE('progress', {
-        phase: 'upload',
-        uploaded,
-        total,
-        speed,
-        percent: Math.round(percent),
-        label: `Uploading ${fmtBytes(uploaded)} / ${fmtBytes(total)} · ${fmtSpeed(speed)}`,
-      });
-    }, signal);
+    let fileInfo;
+    if (localPath) {
+      // Single file upload (zip or regular file)
+      fileInfo = await uploadToGDrive(localPath, ({ uploaded, total, speed, percent }) => {
+        sendSSE('progress', {
+          phase: 'upload',
+          uploaded,
+          total,
+          speed,
+          percent: Math.round(percent),
+          label: `Uploading ${fmtBytes(uploaded)} / ${fmtBytes(total)} · ${fmtSpeed(speed)}`,
+        });
+      }, signal);
+    } else if (downloadDir) {
+      // Folder upload for torrents
+      const folderName = basename(downloadDir);
+      fileInfo = await uploadFolderToGDrive(downloadDir, folderName, ({ uploaded, total, speed, percent, currentFile }) => {
+        sendSSE('progress', {
+          phase: 'upload',
+          uploaded,
+          total,
+          speed,
+          percent: Math.round(percent),
+          label: `Uploading ${fmtBytes(uploaded)} / ${fmtBytes(total)} · ${fmtSpeed(speed)} · ${currentFile}`,
+        });
+      }, signal);
+    }
 
     // --- Cleanup ---
     if (localPath) await unlink(localPath);

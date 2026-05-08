@@ -108,7 +108,7 @@ export async function renderDashboard(username, onNavigate) {
           </div>
 
           <!-- YouTube options (hidden until YouTube URL is detected) -->
-          <div id="yt-options" style="display:none; margin-top:16px; display:none;">
+          <div id="yt-options" style="display:none; margin-top:16px;">
             <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
               <div class="form-group" style="margin:0; flex:1; min-width:140px;">
                 <label for="yt-format" style="font-size:0.82rem;">Format</label>
@@ -134,6 +134,18 @@ export async function renderDashboard(username, onNavigate) {
               </div>
             </div>
             <p class="hint" style="margin-top:8px;">🍪 Cookies will be used automatically if uploaded in Settings.</p>
+          </div>
+
+          <!-- Torrent options (hidden until magnet URL is detected) -->
+          <div id="torrent-options" style="display:none; margin-top:16px;">
+            <div class="form-group" style="margin:0;">
+              <label for="torrent-mode" style="font-size:0.82rem;">Upload Mode</label>
+              <select id="torrent-mode" class="form-control" style="padding:8px 10px;">
+                <option value="zip">🗜️ ZIP (single file)</option>
+                <option value="folder">📁 Folder (saves disk space)</option>
+              </select>
+            </div>
+            <p class="hint" style="margin-top:8px;">💡 Folder mode uploads files directly to Drive without zipping, using less disk space.</p>
           </div>
 
           <p class="hint" id="url-hint" style="margin-top:8px;">Paste a YouTube link or a direct file URL.</p>
@@ -173,9 +185,10 @@ export async function renderDashboard(username, onNavigate) {
     onNavigate('logout');
   });
 
-  // Show/hide YouTube options based on URL input
+  // Show/hide YouTube/torrent options based on URL input
   const fileUrlInput = document.getElementById('file-url');
   const ytOptions = document.getElementById('yt-options');
+  const torrentOptions = document.getElementById('torrent-options');
 
   fileUrlInput.addEventListener('input', () => {
     const url = fileUrlInput.value.trim();
@@ -183,12 +196,15 @@ export async function renderDashboard(username, onNavigate) {
     
     if (isYouTubeUrl(url)) {
       ytOptions.style.display = 'block';
+      torrentOptions.style.display = 'none';
       urlHint.innerHTML = '✨ YouTube link detected. Select quality and format.';
     } else if (isMagnetUrl(url)) {
       ytOptions.style.display = 'none';
-      urlHint.innerHTML = '🧲 Magnet link detected. It will be zipped and uploaded.';
+      torrentOptions.style.display = 'block';
+      urlHint.innerHTML = '🧲 Magnet link detected. Choose upload mode.';
     } else {
       ytOptions.style.display = 'none';
+      torrentOptions.style.display = 'none';
       urlHint.innerHTML = 'Paste a YouTube link, a Magnet link, or a direct file URL.';
     }
   });
@@ -222,6 +238,7 @@ export async function renderDashboard(username, onNavigate) {
     const format = document.getElementById('yt-format')?.value || 'video';
     const quality = document.getElementById('yt-quality')?.value || 'best';
     const isLive = document.getElementById('yt-live')?.checked || false;
+    const torrentMode = document.getElementById('torrent-mode')?.value || null;
 
     // Reset UI
     activeTransfer = true;
@@ -285,6 +302,7 @@ export async function renderDashboard(username, onNavigate) {
       document.getElementById('history-container').innerHTML = renderHistory(history);
       fileUrlInput.value = '';
       ytOptions.style.display = 'none';
+      torrentOptions.style.display = 'none';
       transferBtn.disabled = false;
       transferBtn.textContent = 'Upload to Drive';
       setTimeout(() => { progressSection.style.display = 'none'; }, 2000);
@@ -309,7 +327,7 @@ export async function renderDashboard(username, onNavigate) {
 
     // Now fire the actual request (non-blocking — progress comes through SSE)
     try {
-      await api.transfer(url, format, quality, isLive);
+      await api.transfer(url, format, quality, isLive, torrentMode);
     } catch (err) {
       if (!transferComplete) {
         activeTransfer = false;

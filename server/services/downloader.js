@@ -287,10 +287,14 @@ async function zipDirectory(sourceDir, outPath) {
 }
 
 /**
- * Download a torrent via magnet link and zip it.
- * Returns { zipPath, downloadDir } so the caller can clean up the directory later.
+ * Download a torrent via magnet link and optionally zip it.
+ * @param {string} magnetUrl - The magnet link to download
+ * @param {function} onProgress - Progress callback
+ * @param {AbortSignal} abortSignal - Abort signal for cancellation
+ * @param {boolean} skipZip - If true, skip zipping and return only the directory
+ * Returns { zipPath, downloadDir } or { downloadDir } if skipZip is true
  */
-async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null) {
+async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null, skipZip = false) {
   return new Promise((resolve, reject) => {
     // webtorrent can throw if magnet is invalid
     let client;
@@ -320,7 +324,13 @@ async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null)
 
       torrent.on('done', async () => {
         console.log(`✅ Torrent download complete: ${torrent.name}`);
-        // Sanitize filename for ZIP
+        
+        if (skipZip) {
+          client.destroy();
+          resolve({ downloadDir });
+          return;
+        }
+        
         const safeName = (torrent.name || torrentId).replace(/[^a-z0-9. _-]/gi, '_');
         const zipPath = join(TMP_DIR, `${safeName}.zip`);
         
@@ -357,7 +367,7 @@ async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null)
 /**
  * Download a URL using the best method available.
  */
-export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false) {
+export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false) {
   ensureTmpDir();
 
   const clean = cleanUrl(url);
@@ -365,7 +375,7 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const isMag = isMagnet(url);
   
   if (isMag) {
-    return await downloadTorrent(url, onProgress, abortSignal);
+    return await downloadTorrent(url, onProgress, abortSignal, skipZip);
   }
 
   const d = new Date();
