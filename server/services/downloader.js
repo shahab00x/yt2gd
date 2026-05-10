@@ -318,6 +318,18 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
       return reject(err);
     }
 
+    // Swallow non-fatal peer/UTP errors so they don't crash the process
+    client.on('error', (err) => {
+      const msg = err?.message || '';
+      if (msg.includes('UTP_') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT')) {
+        console.warn(`⚠️  WebTorrent peer error (ignored): ${msg}`);
+      } else {
+        console.error(`❌ WebTorrent error: ${msg}`);
+        client.destroy();
+        reject(err);
+      }
+    });
+
     const torrentId = `torrent_${Date.now()}`;
     const downloadDir = join(TMP_DIR, torrentId);
     if (!existsSync(downloadDir)) mkdirSync(downloadDir, { recursive: true });

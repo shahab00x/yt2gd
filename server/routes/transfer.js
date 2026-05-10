@@ -63,14 +63,22 @@ router.get('/progress', (req, res) => {
  */
 router.post('/cancel', (req, res) => {
   const sessionId = req.session.id;
-  const controller = req.app.locals.activeTransfers[sessionId];
-  
+  const controller = req.app.locals.activeTransfers?.[sessionId];
+  const { transferId } = req.body;
+
+  // If a specific paused transfer ID is provided, delete it from the store
+  if (transferId) {
+    deleteTransfer(transferId);
+  }
+
   if (controller) {
     controller.abort();
     delete req.app.locals.activeTransfers[sessionId];
     return res.json({ success: true, message: 'Transfer cancelled.' });
   }
-  return res.json({ success: false, message: 'No active transfer to cancel.' });
+
+  // Even if no active download, we may have cleaned a paused transfer above
+  return res.json({ success: true, message: transferId ? 'Paused transfer removed.' : 'No active transfer to cancel.' });
 });
 
 /**
@@ -108,7 +116,7 @@ router.post('/', async (req, res) => {
     }
   }
 
-  saveTransfer(transferId, { url, type: 'download', status: 'initializing' });
+  saveTransfer(transferId, { url, type: 'download', status: 'initializing', torrentMode: torrentMode || null });
 
   let localPath = null;
   let downloadDir = null;
@@ -167,9 +175,12 @@ router.post('/', async (req, res) => {
       return res.json(result);
     } else if (downloadResult.batchPaused) {
       // One batch finished, waiting for user to resume next
-      updateTransferStatus(transferId, 'paused_user', { error: 'Waiting for user to resume next batch' });
-      // We send an 'error' event with a specific message to stop the client UI spinner,
-      // but because the status is 'paused_user', it will show up as resumable in the Active Transfers list.
+      // Save nextBatchIndex and torrentMode so Resume can re-submit correctly
+      updateTransferStatus(transferId, 'paused_user', {
+        nextBatchIndex: startBatchIndex + 1,
+        torrentMode: effectiveTorrentMode,
+        error: 'Waiting for user to resume next batch'
+      });
       sendSSE('error', { message: 'Batch complete. Please clear space and click Resume for the next batch.' });
       return res.json({ success: true, message: 'Batch paused for user.' });
     }

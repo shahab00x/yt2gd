@@ -30,7 +30,7 @@ export const api = {
   getSettings: () => request('GET', '/auth/settings'),
   saveSettings: (data) => request('POST', '/auth/settings', data),
   transfer: (url, format, quality, isLive, torrentMode, startBatchIndex = 0) => request('POST', '/transfer', { url, format, quality, isLive, torrentMode, startBatchIndex }),
-  cancelTransfer: () => request('POST', '/transfer/cancel'),
+  cancelTransfer: (transferId = null) => request('POST', '/transfer/cancel', transferId ? { transferId } : null),
   getInfo: () => request('GET', '/auth/info'),
   getCookiesStatus: () => request('GET', '/auth/cookies/status'),
   deleteCookies: () => request('DELETE', '/auth/cookies'),

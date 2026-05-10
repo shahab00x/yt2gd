@@ -236,7 +236,7 @@ export async function renderDashboard(username, onNavigate) {
               ${batchInfo}
             </div>
             <div style="display:flex; gap:8px;">
-              ${t.status === 'paused_quota' || t.status === 'paused_user' ? `<button class="btn btn-primary resume-btn" data-id="${id}" data-url="${t.url}" data-batch="${t.batch || 0}" style="padding:6px 12px; font-size:0.75rem;">Resume</button>` : ''}
+              ${t.status === 'paused_quota' || t.status === 'paused_user' ? `<button class="btn btn-primary resume-btn" data-id="${id}" data-url="${t.url}" data-batch="${t.nextBatchIndex || 0}" data-torrent-mode="${t.torrentMode || ''}" style="padding:6px 12px; font-size:0.75rem;">Resume</button>` : ''}
               <button class="btn btn-ghost cancel-active-btn" data-id="${id}" style="padding:6px 12px; font-size:0.75rem; color:var(--error);">Cancel</button>
             </div>
           </div>
@@ -248,16 +248,20 @@ export async function renderDashboard(username, onNavigate) {
          btn.onclick = () => {
             const url = btn.dataset.url;
             const batch = btn.dataset.batch;
+            const torrentMode = btn.dataset.torrentMode;
             document.getElementById('file-url').value = url;
             document.getElementById('file-url').dataset.startBatch = batch;
+            // Restore torrentMode so the resumed transfer uses the correct mode
+            const torrentModeEl = document.getElementById('torrent-mode');
+            if (torrentModeEl && torrentMode) torrentModeEl.value = torrentMode;
             document.getElementById('file-url').dispatchEvent(new Event('input'));
             document.getElementById('transfer-btn').click();
          };
       });
       activeContainer.querySelectorAll('.cancel-active-btn').forEach(btn => {
          btn.onclick = async () => {
-            await api.cancelTransfer(); // This cancels whatever is currently running
-            // We might need a per-id cancel if we have multi-user or multiple transfers
+            const transferId = btn.dataset.id;
+            await api.cancelTransfer(transferId);
          };
       });
 
