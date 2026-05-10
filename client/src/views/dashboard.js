@@ -169,6 +169,17 @@ export async function renderDashboard(username, onNavigate) {
           <div id="transfer-result" style="margin-top:20px; display:none;"></div>
         </div>
 
+        <!-- Active Transfers (Persisted) -->
+        <div id="active-transfers-section" style="display:none; margin-bottom: 24px;">
+           <div class="card fade-up">
+              <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>⏳ Active Transfers</span>
+                <span class="badge" style="background:var(--bg-elevated); color:var(--text-secondary); font-size:0.7rem;">Persisted</span>
+              </div>
+              <div id="active-transfers-container"></div>
+           </div>
+        </div>
+
         <!-- History Card -->
         <div class="card fade-up" style="animation-delay: 0.1s">
           <div class="card-title">📋 Recent Transfers</div>
@@ -184,6 +195,80 @@ export async function renderDashboard(username, onNavigate) {
     await api.logout();
     onNavigate('logout');
   });
+
+  // Active Transfers Polling
+  const activeContainer = document.getElementById('active-transfers-container');
+  const activeSection = document.getElementById('active-transfers-section');
+
+  async function refreshActiveTransfers() {
+    try {
+      const transfers = await api.getTransferList();
+      const ids = Object.keys(transfers);
+      
+      if (ids.length === 0) {
+        activeSection.style.display = 'none';
+        return;
+      }
+      
+      activeSection.style.display = 'block';
+      activeContainer.innerHTML = ids.map(id => {
+        const t = transfers[id];
+        let statusLabel = t.status;
+        let badgeClass = '';
+        if (t.status === 'downloading') badgeClass = 'badge-success';
+        if (t.status === 'uploading') badgeClass = 'badge-success';
+        if (t.status === 'paused_quota') {
+           statusLabel = 'Paused (Disk/Drive Full)';
+           badgeClass = 'badge-error';
+        }
+
+        const batchInfo = t.batch ? `<div class="file-meta">Batch ${t.batch} of ${t.totalBatches}</div>` : '';
+
+        return `
+          <div class="history-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
+            <div class="file-info">
+              <div class="file-name" style="font-size:0.95rem;">${t.name || t.url || 'Active Transfer'}</div>
+              <div class="file-meta">${statusLabel} · Started ${new Date(t.updatedAt).toLocaleTimeString()}</div>
+              ${batchInfo}
+            </div>
+            <div style="display:flex; gap:8px;">
+              ${t.status === 'paused_quota' ? `<button class="btn btn-primary resume-btn" data-id="${id}" data-url="${t.url}" data-batch="${t.batch || 0}" style="padding:6px 12px; font-size:0.75rem;">Resume</button>` : ''}
+              <button class="btn btn-ghost cancel-active-btn" data-id="${id}" style="padding:6px 12px; font-size:0.75rem; color:var(--error);">Cancel</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Add listeners to new buttons
+      activeContainer.querySelectorAll('.resume-btn').forEach(btn => {
+         btn.onclick = () => {
+            const url = btn.dataset.url;
+            const batch = btn.dataset.batch;
+            document.getElementById('file-url').value = url;
+            document.getElementById('file-url').dataset.startBatch = batch;
+            document.getElementById('file-url').dispatchEvent(new Event('input'));
+            document.getElementById('transfer-btn').click();
+         };
+      });
+      activeContainer.querySelectorAll('.cancel-active-btn').forEach(btn => {
+         btn.onclick = async () => {
+            await api.cancelTransfer(); // This cancels whatever is currently running
+            // We might need a per-id cancel if we have multi-user or multiple transfers
+         };
+      });
+
+    } catch (err) { console.error('Failed to fetch transfers:', err); }
+  }
+
+  refreshActiveTransfers();
+  const pollInterval = setInterval(refreshActiveTransfers, 5000);
+  
+  // Clean up interval on navigation
+  const originalOnNavigate = onNavigate;
+  onNavigate = (target) => {
+    clearInterval(pollInterval);
+    originalOnNavigate(target);
+  };
 
   // Show/hide YouTube/torrent options based on URL input
   const fileUrlInput = document.getElementById('file-url');
@@ -239,6 +324,8 @@ export async function renderDashboard(username, onNavigate) {
     const quality = document.getElementById('yt-quality')?.value || 'best';
     const isLive = document.getElementById('yt-live')?.checked || false;
     const torrentMode = document.getElementById('torrent-mode')?.value || null;
+    const startBatchIndex = parseInt(fileUrlInput.dataset.startBatch || '0', 10);
+    delete fileUrlInput.dataset.startBatch;
 
     // Reset UI
     activeTransfer = true;
@@ -327,7 +414,7 @@ export async function renderDashboard(username, onNavigate) {
 
     // Now fire the actual request (non-blocking — progress comes through SSE)
     try {
-      await api.transfer(url, format, quality, isLive, torrentMode);
+      await api.transfer(url, format, quality, isLive, torrentMode, startBatchIndex);
     } catch (err) {
       if (!transferComplete) {
         activeTransfer = false;

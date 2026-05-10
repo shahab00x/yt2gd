@@ -1,62 +1,69 @@
-# Design: Torrent Upload Reliability & Structure Preservation
+# Design
 
-## Architecture
+## 1. Architecture Overview
+To support large torrents that exceed VPS and Google Drive storage limits, the download pipeline will be enhanced with a **State Manager** and a **Batch Processor**.
 
-The solution involves modifying the Google Drive service to support recursive folder uploads and more robust transmission protocols.
+- **State Manager (JSON Store):** A new module (`server/services/store.js`) will persist transfer states to disk (e.g., `data/transfers.json`). This ensures that downloads survive server restarts and allows the frontend to poll the active state across sessions.
+- **Batch Processor:** Instead of downloading the entire torrent at once, WebTorrent will be instructed to select files in batches (e.g., up to 5GB per batch).
+- **Upload & Cleanup:** Once a batch is downloaded, it is uploaded to Google Drive. The local files are then deleted, freeing up VPS space for the next batch.
+- **Quota Handling:** If Google Drive returns a quota error (403), the torrent state is changed to `paused_quota`. The user can later trigger a `resume` action from the UI.
 
-### 1. Recursive Folder Mapping
-To preserve the directory structure on Google Drive:
-- We will implement a recursive upload function that maps local paths to Drive folder IDs.
-- A `Map<string, string>` will be used to cache `localPath -> driveFolderId` to avoid repeated `files.list` or `files.create` calls for the same directory.
+## 2. Data Models
 
-### 2. Resumable Upload Implementation
-- We will switch from `multipart` uploads to `resumable` uploads in `googleapis`.
-- This is done by setting `uploadType: 'resumable'` in the media parameters.
-- This allows the library to handle chunked transmission and retry on certain errors automatically.
-
-### 3. Startup Cleanup
-- A utility function `clearTmp()` will be added to `downloader.js`.
-- It will use `rmSync(TMP_DIR, { recursive: true, force: true })` followed by `mkdirSync`.
-- This will be called in `server/index.js` before `app.listen`.
-
-## Data Models & Logic
-
-### Folder Upload Logic (Pseudocode)
-```javascript
-async function uploadFolder(localDirPath, parentDriveId) {
-  const files = getAllFilesRecursive(localDirPath);
-  const folderCache = { '': parentDriveId };
-
-  for (const file of files) {
-    const relativePath = path.relative(localDirPath, file);
-    const parts = relativePath.split(path.sep);
-    const fileName = parts.pop();
-    
-    // Ensure all parent directories exist on Drive
-    let currentParentId = parentDriveId;
-    let pathAcc = "";
-    for (const part of parts) {
-      pathAcc = path.join(pathAcc, part);
-      if (!folderCache[pathAcc]) {
-        folderCache[pathAcc] = await findOrCreateFolder(drive, part, currentParentId);
-      }
-      currentParentId = folderCache[pathAcc];
+**Transfer State (`data/transfers.json`):**
+```json
+{
+  "transfers": {
+    "torrent_12345": {
+      "id": "torrent_12345",
+      "type": "torrent",
+      "url": "magnet:?xt=urn:btih:...",
+      "name": "Ubuntu 22.04 LTS",
+      "status": "downloading", // downloading, uploading, paused_quota, completed, error
+      "totalBytes": 15000000000,
+      "downloadedBytes": 0,
+      "uploadedBytes": 0,
+      "completedFiles": ["file1.iso", "file2.txt"]
     }
-
-    await uploadFileToDrive(file, fileName, currentParentId, { resumable: true });
   }
 }
 ```
 
-## Diagrams
+## 3. Workflows
 
 ```mermaid
-graph TD
-    A[Start Transfer] --> B{isMagnet?}
-    B -- Yes --> C[Download Torrent]
-    C --> D[downloadResult.downloadDir]
-    D --> E[uploadFolderToGDrive]
-    E --> F[Preserve Structure & Resumable Upload]
-    F --> G[Cleanup TMP]
-    G --> H[End]
+sequenceDiagram
+    participant User
+    participant UI
+    participant Server
+    participant WebTorrent
+    participant GDrive
+
+    User->>UI: Add large Magnet Link
+    UI->>Server: POST /api/transfer (magnet)
+    Server->>WebTorrent: Fetch Metadata
+    WebTorrent-->>Server: Torrent Metadata
+    Server->>Server: Calculate Batch 1 (e.g. 5GB)
+    Server->>WebTorrent: Select Batch 1 files only
+    WebTorrent-->>Server: Batch 1 Download Complete
+    Server->>GDrive: Upload Batch 1
+    GDrive-->>Server: Upload Success
+    Server->>Server: Delete Batch 1 from local disk
+    Server->>Server: Calculate Batch 2
+    Server->>WebTorrent: Select Batch 2 files
+    WebTorrent-->>Server: Batch 2 Download Complete
+    Server->>GDrive: Upload Batch 2
+    GDrive-->>Server: Error 403 (Storage Quota Exceeded)
+    Server->>Server: Update state -> paused_quota
+    Server-->>UI: Status: Paused (Need Space)
+    User->>GDrive: Delete files to make space
+    User->>UI: Click Resume
+    UI->>Server: POST /api/transfer/resume
+    Server->>GDrive: Retry Upload Batch 2
+    GDrive-->>Server: Upload Success
 ```
+
+## 4. UI Modifications
+- Update `dashboard.js` to fetch and display active transfers on load.
+- Add "Resume" button for paused transfers.
+- Show overall progress based on the persisted state rather than a single session SSE.

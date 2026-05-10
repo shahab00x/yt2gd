@@ -196,6 +196,10 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
     console.log(`✅ Uploaded "${fileName}" → Drive ID: ${res.data.id}`);
     return res.data;
   } catch (err) {
+    const isQuotaError = err.errors && err.errors.some(e => e.reason === 'storageQuotaExceeded' || e.message?.toLowerCase().includes('quota exceeded'));
+    if (isQuotaError) {
+      throw new Error('GOOGLE_DRIVE_QUOTA_EXCEEDED');
+    }
     if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
     throw err;
   } finally {
@@ -336,7 +340,14 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
       }
     } catch (err) {
       console.error(`❌ Failed to upload "${relativePath}":`, err.message);
-      // We should probably fail the whole transfer if a file fails to ensure integrity
+      
+      // Check for Google Drive Quota Exceeded error
+      const isQuotaError = err.errors && err.errors.some(e => e.reason === 'storageQuotaExceeded' || e.message?.toLowerCase().includes('quota exceeded'));
+      
+      if (isQuotaError) {
+        throw new Error('GOOGLE_DRIVE_QUOTA_EXCEEDED');
+      }
+
       if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
       throw err;
     } finally {

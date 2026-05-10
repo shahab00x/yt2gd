@@ -6,6 +6,7 @@ import { requireAuth } from './auth.js';
 import { downloadFile } from '../services/downloader.js';
 import { uploadToGDrive, uploadFolderToGDrive, getTodayFolderName } from '../services/gdrive.js';
 import { loadSettings } from '../services/settings.js';
+import { saveTransfer, deleteTransfer, updateTransferStatus, getTransfers } from '../services/store.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -73,20 +74,25 @@ router.post('/cancel', (req, res) => {
 });
 
 /**
+ * GET /api/transfer/list
+ * Returns all active and paused transfers.
+ */
+router.get('/list', (req, res) => {
+  res.json(getTransfers());
+});
+
+/**
  * POST /api/transfer
- * Body: { url, format?, quality?, torrentMode? }
- *   format  — 'video' | 'audio'
- *   quality — 'best' | '1080' | '720' | '480' | '360' | 'worst'
- *   torrentMode — 'zip' | 'folder' (for magnet links)
  */
 router.post('/', async (req, res) => {
-  const { url, format = 'video', quality = 'best', isLive = false, torrentMode } = req.body;
+  const { url, format = 'video', quality = 'best', isLive = false, torrentMode, startBatchIndex = 0 } = req.body;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'A valid URL is required.' });
   }
 
   const sessionId = req.session.id;
+  const transferId = `tr_${Date.now()}`;
 
   // Initialize cancellation controller
   const abortController = new AbortController();
@@ -102,11 +108,16 @@ router.post('/', async (req, res) => {
     }
   }
 
+  saveTransfer(transferId, { url, type: 'download', status: 'initializing' });
+
   let localPath = null;
   let downloadDir = null;
+  let parentDir = null;
+
   try {
     // --- Download phase ---
     sendSSE('status', { phase: 'download', message: 'Starting download…' });
+    updateTransferStatus(transferId, 'downloading');
 
     // Resolve and filter cookies path from settings
     const settings = loadSettings();
@@ -119,32 +130,59 @@ router.post('/', async (req, res) => {
       cookiesPath = filterCookies(cookiesPath);
     }
 
-    // Determine if we should skip zipping for torrents
     const defaultTorrentMode = settings.torrentMode || 'zip';
     const effectiveTorrentMode = torrentMode || defaultTorrentMode;
     const skipZip = effectiveTorrentMode === 'folder';
 
+    // onBatchComplete callback for large torrents
+    const onBatchComplete = async (batch) => {
+      sendSSE('status', { phase: 'upload', message: `Uploading batch ${batch.batchIndex + 1}/${batch.totalBatches}…` });
+      updateTransferStatus(transferId, 'uploading', { 
+        batch: batch.batchIndex + 1, 
+        totalBatches: batch.totalBatches,
+        name: batch.name
+      });
+
+      await uploadFolderToGDrive(batch.dir, batch.name, ({ uploaded, total, speed, percent, currentFile }) => {
+        sendSSE('progress', {
+          phase: 'upload',
+          uploaded,
+          total,
+          speed,
+          percent: Math.round(percent),
+          label: `Uploading batch ${batch.batchIndex + 1} · ${currentFile}`,
+        });
+      }, signal);
+    };
+
     const downloadResult = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });
-    }, signal, isLive, skipZip);
+    }, signal, isLive, skipZip, onBatchComplete, startBatchIndex);
+
+    if (downloadResult.completed) {
+      // Large torrent batching finished
+      deleteTransfer(transferId);
+      const result = { success: true, fileName: downloadResult.torrentName, message: 'Torrent batch transfer complete.' };
+      sendSSE('done', result);
+      return res.json(result);
+    }
 
     if (typeof downloadResult === 'string') {
       localPath = downloadResult;
     } else if (downloadResult.zipPath) {
-      // Zip mode
       localPath = downloadResult.zipPath;
       downloadDir = downloadResult.downloadDir;
     } else if (downloadResult.downloadDir) {
-      // Folder mode
       downloadDir = downloadResult.downloadDir;
+      parentDir = downloadResult.parentDir;
     }
 
-    // --- Upload phase ---
+    // --- Upload phase (for non-batched files) ---
     sendSSE('status', { phase: 'upload', message: 'Uploading to Google Drive…' });
+    updateTransferStatus(transferId, 'uploading');
 
     let fileInfo;
     if (localPath) {
-      // Single file upload (zip or regular file)
       fileInfo = await uploadToGDrive(localPath, ({ uploaded, total, speed, percent }) => {
         sendSSE('progress', {
           phase: 'upload',
@@ -156,8 +194,7 @@ router.post('/', async (req, res) => {
         });
       }, signal);
     } else if (downloadDir) {
-      // Folder upload for torrents
-      const folderName = basename(downloadDir);
+      const folderName = downloadResult.torrentName || basename(downloadDir);
       fileInfo = await uploadFolderToGDrive(downloadDir, folderName, ({ uploaded, total, speed, percent, currentFile }) => {
         sendSSE('progress', {
           phase: 'upload',
@@ -165,16 +202,17 @@ router.post('/', async (req, res) => {
           total,
           speed,
           percent: Math.round(percent),
-          label: `Uploading ${fmtBytes(uploaded)} / ${fmtBytes(total)} · ${fmtSpeed(speed)} · ${currentFile}`,
+          label: `Uploading ${fmtBytes(uploaded)} / ${fmtBytes(total)} · ${currentFile}`,
         });
       }, signal);
     }
 
     // --- Cleanup ---
     if (localPath) await unlink(localPath);
-    if (downloadDir) await rm(downloadDir, { recursive: true, force: true });
+    if (parentDir) await rm(parentDir, { recursive: true, force: true });
+    else if (downloadDir) await rm(downloadDir, { recursive: true, force: true });
     
-    localPath = null;
+    deleteTransfer(transferId);
 
     const result = {
       success: true,
@@ -184,22 +222,27 @@ router.post('/', async (req, res) => {
       webViewLink: fileInfo.webViewLink || null,
     };
 
-    // Remove from active transfers on success
     delete req.app.locals.activeTransfers[sessionId];
-
     sendSSE('done', result);
     return res.json(result);
 
   } catch (err) {
     console.error('Transfer failed/cancelled:', err.message);
+    
+    if (err.message === 'GOOGLE_DRIVE_QUOTA_EXCEEDED') {
+      updateTransferStatus(transferId, 'paused_quota', { error: 'Google Drive Quota Exceeded' });
+    } else {
+      deleteTransfer(transferId);
+    }
 
-    // Remove from active transfers on error/cancel
     delete req.app.locals.activeTransfers[sessionId];
 
     if (localPath) {
       try { await unlink(localPath); } catch (_) {}
     }
-    if (downloadDir) {
+    if (parentDir) {
+      try { await rm(parentDir, { recursive: true, force: true }); } catch (_) {}
+    } else if (downloadDir) {
       try { await rm(downloadDir, { recursive: true, force: true }); } catch (_) {}
     }
 

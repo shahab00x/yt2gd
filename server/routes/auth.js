@@ -77,7 +77,8 @@ router.get('/settings', requireAuth, (req, res) => {
     clientId: gd.clientId || '',
     clientSecret: gd.clientSecret ? '••••••••' : '',
     redirectUri: gd.redirectUri || '',
-    hasRefreshToken: !!gd.refreshToken
+    hasRefreshToken: !!gd.refreshToken,
+    torrentBatchSizeGB: settings.torrentBatchSizeGB || 12
   });
 });
 
@@ -95,6 +96,11 @@ router.post('/settings', requireAuth, (req, res) => {
     redirectUri: redirectUri ?? current.redirectUri,
     refreshToken: refreshToken ?? current.refreshToken
   });
+
+  if (req.body.torrentBatchSizeGB !== undefined) {
+    const { updateBatchSize } = await import('../services/settings.js');
+    updateBatchSize(req.body.torrentBatchSizeGB);
+  }
 
   res.json({ success: true });
 });

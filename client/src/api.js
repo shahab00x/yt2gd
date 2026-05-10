@@ -29,11 +29,12 @@ export const api = {
   me: () => request('GET', '/auth/me'),
   getSettings: () => request('GET', '/auth/settings'),
   saveSettings: (data) => request('POST', '/auth/settings', data),
-  transfer: (url, format, quality, isLive, torrentMode) => request('POST', '/transfer', { url, format, quality, isLive, torrentMode }),
+  transfer: (url, format, quality, isLive, torrentMode, startBatchIndex = 0) => request('POST', '/transfer', { url, format, quality, isLive, torrentMode, startBatchIndex }),
   cancelTransfer: () => request('POST', '/transfer/cancel'),
   getInfo: () => request('GET', '/auth/info'),
   getCookiesStatus: () => request('GET', '/auth/cookies/status'),
   deleteCookies: () => request('DELETE', '/auth/cookies'),
+  getTransferList: () => request('GET', '/transfer/list'),
 
   /**
    * Upload a cookies.txt file (multipart/form-data).

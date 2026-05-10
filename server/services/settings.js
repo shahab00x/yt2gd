@@ -13,7 +13,8 @@ const DEFAULT_SETTINGS = {
     clientSecret: '',
     redirectUri: '',
     refreshToken: ''
-  }
+  },
+  torrentBatchSizeGB: 12
 };
 
 /**
@@ -26,7 +27,8 @@ export function loadSettings() {
   }
   try {
     const raw = readFileSync(SETTINGS_PATH, 'utf-8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_SETTINGS, ...parsed };
   } catch (e) {
     console.error('Failed to parse settings.json, using defaults.', e.message);
     return DEFAULT_SETTINGS;
@@ -55,5 +57,13 @@ export function updateGdriveSettings(gdriveConfig) {
 export function updateCookiesPath(cookiesPath) {
   const settings = loadSettings();
   settings.cookiesPath = cookiesPath;
+  saveSettings(settings);
+}
+/**
+ * Update the torrent batch size limit.
+ */
+export function updateBatchSize(sizeGB) {
+  const settings = loadSettings();
+  settings.torrentBatchSizeGB = parseFloat(sizeGB) || 12;
   saveSettings(settings);
 }

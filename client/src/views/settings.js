@@ -62,6 +62,12 @@ export function renderSettings(username, onNavigate) {
                 placeholder="Leave blank to keep existing" />
               <p class="hint">Leave blank to keep the existing token.</p>
             </div>
+            <div class="form-group">
+              <label for="torrentBatchSizeGB">Torrent Batch Size (GB)</label>
+              <input id="torrentBatchSizeGB" class="form-control" type="number" step="0.5" min="1"
+                placeholder="12" />
+              <p class="hint">Max space to use for torrent batches before uploading.</p>
+            </div>
           </div>
 
           <div id="settings-result" style="margin-top:4px; display:none;"></div>
@@ -122,6 +128,7 @@ export function renderSettings(username, onNavigate) {
     if (s.redirectUri) document.getElementById('redirectUri').value = s.redirectUri;
     if (s.clientSecret) document.getElementById('clientSecret').placeholder = 'Saved (hidden)';
     if (s.hasRefreshToken) document.getElementById('refreshToken').placeholder = 'Saved (hidden)';
+    if (s.torrentBatchSizeGB) document.getElementById('torrentBatchSizeGB').value = s.torrentBatchSizeGB;
   }).catch(err => {
     const box = document.getElementById('settings-load-error');
     box.textContent = 'Could not load current settings: ' + err.message;
@@ -142,7 +149,8 @@ export function renderSettings(username, onNavigate) {
         clientId: document.getElementById('clientId').value.trim(),
         clientSecret: document.getElementById('clientSecret').value,
         redirectUri: document.getElementById('redirectUri').value.trim(),
-        refreshToken: document.getElementById('refreshToken').value
+        refreshToken: document.getElementById('refreshToken').value,
+        torrentBatchSizeGB: parseFloat(document.getElementById('torrentBatchSizeGB').value)
       });
 
       resultBox.className = 'alert alert-success';

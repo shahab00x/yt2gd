@@ -5,6 +5,7 @@ import { create } from 'youtube-dl-exec';
 import axios from 'axios';
 import WebTorrent from 'webtorrent';
 import archiver from 'archiver';
+import { loadSettings } from './settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -303,15 +304,13 @@ async function zipDirectory(sourceDir, outPath) {
 
 /**
  * Download a torrent via magnet link and optionally zip it.
- * @param {string} magnetUrl - The magnet link to download
- * @param {function} onProgress - Progress callback
- * @param {AbortSignal} abortSignal - Abort signal for cancellation
- * @param {boolean} skipZip - If true, skip zipping and return only the directory
- * Returns { zipPath, downloadDir } or { downloadDir } if skipZip is true
+ * Implements batching for large torrents in folder mode.
  */
-async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null, skipZip = false) {
+export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null, skipZip = false, onBatchComplete = null, startBatchIndex = 0) {
+  const settings = loadSettings();
+  const batchLimitBytes = (settings.torrentBatchSizeGB || 12) * 1024 * 1024 * 1024;
+
   return new Promise((resolve, reject) => {
-    // webtorrent can throw if magnet is invalid
     let client;
     try {
       client = new WebTorrent();
@@ -321,44 +320,137 @@ async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null,
 
     const torrentId = `torrent_${Date.now()}`;
     const downloadDir = join(TMP_DIR, torrentId);
-    
     if (!existsSync(downloadDir)) mkdirSync(downloadDir, { recursive: true });
 
-    client.add(magnetUrl, { path: downloadDir }, (torrent) => {
-      console.log(`🧲 Torrent metadata received: ${torrent.name}`);
+    client.add(magnetUrl, { path: downloadDir }, async (torrent) => {
+      console.log(`🧲 Torrent metadata received: ${torrent.name} (${(torrent.length / 1024 / 1024).toFixed(2)} MB)`);
 
-      const updateProgress = () => {
+      const updateProgress = (batchIndex, totalBatches) => {
         if (onProgress) {
           const speed = (torrent.downloadSpeed / 1024 / 1024).toFixed(2);
           const percent = (torrent.progress * 100).toFixed(1);
-          onProgress(`Downloading: ${percent}% (${speed} MB/s) · Peers: ${torrent.numPeers}`);
+          const batchInfo = totalBatches > 1 ? ` [Batch ${batchIndex + 1}/${totalBatches}]` : '';
+          onProgress(`Downloading${batchInfo}: ${percent}% (${speed} MB/s) · Peers: ${torrent.numPeers}`);
         }
       };
 
-      torrent.on('download', updateProgress);
+      // For zip mode or small torrents, download everything at once
+      if (!skipZip || torrent.length <= batchLimitBytes) {
+        torrent.on('download', () => updateProgress(0, 1));
+        torrent.on('done', async () => {
+          console.log(`✅ Torrent download complete: ${torrent.name}`);
+          
+          const safeName = (torrent.name || torrentId).replace(/[^a-z0-9. _-]/gi, '_');
+          // If it's a folder-style torrent, the actual files are in a subfolder named torrent.name
+          const actualDataDir = join(downloadDir, torrent.name || '');
+          const uploadPath = existsSync(actualDataDir) ? actualDataDir : downloadDir;
 
-      torrent.on('done', async () => {
-        console.log(`✅ Torrent download complete: ${torrent.name}`);
-        
-        if (skipZip) {
-          client.destroy();
-          resolve({ downloadDir });
-          return;
-        }
-        
-        const safeName = (torrent.name || torrentId).replace(/[^a-z0-9. _-]/gi, '_');
-        const zipPath = join(TMP_DIR, `${safeName}.zip`);
+          if (skipZip) {
+            client.destroy();
+            resolve({ downloadDir: uploadPath, torrentName: torrent.name, parentDir: downloadDir });
+            return;
+          }
+
+          const zipPath = join(TMP_DIR, `${safeName}.zip`);
+          try {
+            if (onProgress) onProgress(`Packaging into ZIP...`);
+            await zipDirectory(uploadPath, zipPath);
+            client.destroy();
+            resolve({ zipPath, downloadDir, torrentName: torrent.name });
+          } catch (err) {
+            client.destroy();
+            reject(err);
+          }
+        });
+      } else {
+        // --- BATCHING LOGIC for large torrents in folder mode ---
+        console.log(`📦 Large torrent detected. Processing in ${settings.torrentBatchSizeGB}GB batches.`);
         
         try {
-          if (onProgress) onProgress(`Packaging into ZIP...`);
-          await zipDirectory(downloadDir, zipPath);
+          // Deselect all files initially
+          torrent.files.forEach(f => f.deselect());
+
+          // Group files into batches
+          const batches = [];
+          let currentBatch = [];
+          let currentBatchSize = 0;
+
+          for (const file of torrent.files) {
+            if (currentBatchSize + file.length > batchLimitBytes && currentBatch.length > 0) {
+              batches.push(currentBatch);
+              currentBatch = [];
+              currentBatchSize = 0;
+            }
+            currentBatch.push(file);
+            currentBatchSize += file.length;
+          }
+          if (currentBatch.length > 0) batches.push(currentBatch);
+
+          // Process each batch
+          for (let i = startBatchIndex; i < batches.length; i++) {
+            if (abortSignal?.aborted) throw new Error('Download cancelled by user.');
+            
+            const batch = batches[i];
+            batch.forEach(f => f.select());
+
+            console.log(`🚀 Starting Batch ${i + 1}/${batches.length} (${batch.length} files)`);
+
+            // Wait for batch to download
+            await new Promise((res, rej) => {
+              const onDownload = () => updateProgress(i, batches.length);
+              torrent.on('download', onDownload);
+              
+              const checkDone = setInterval(() => {
+                const batchDone = batch.every(f => f.progress === 1);
+                if (batchDone) {
+                  clearInterval(checkDone);
+                  torrent.removeListener('download', onDownload);
+                  res();
+                }
+                if (abortSignal?.aborted) {
+                  clearInterval(checkDone);
+                  rej(new Error('Download cancelled by user.'));
+                }
+              }, 2000);
+            });
+
+            console.log(`✅ Batch ${i + 1} complete. Triggering upload...`);
+            
+            // Determine the local path for this batch (relative to downloadDir)
+            const actualDataDir = join(downloadDir, torrent.name || '');
+            const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
+
+            if (onBatchComplete) {
+              await onBatchComplete({
+                dir: uploadSource,
+                name: torrent.name || torrentId,
+                batchIndex: i,
+                totalBatches: batches.length
+              });
+            }
+
+            // Cleanup local files in this batch to free space
+            for (const file of batch) {
+              try {
+                const fullPath = join(downloadDir, file.path);
+                if (existsSync(fullPath)) unlinkSync(fullPath);
+              } catch (e) {
+                console.warn(`⚠️ Failed to delete ${file.name}: ${e.message}`);
+              }
+            }
+            
+            // Deselect to stop seeding/watching these files
+            batch.forEach(f => f.deselect());
+          }
+
           client.destroy();
-          resolve({ zipPath, downloadDir });
+          resolve({ completed: true, torrentName: torrent.name });
+
         } catch (err) {
           client.destroy();
           reject(err);
         }
-      });
+      }
     });
 
     client.on('error', (err) => {
@@ -379,10 +471,9 @@ async function downloadTorrent(magnetUrl, onProgress = null, abortSignal = null,
   });
 }
 
-/**
  * Download a URL using the best method available.
  */
-export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false) {
+export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false, onBatchComplete = null, startBatchIndex = 0) {
   ensureTmpDir();
 
   const clean = cleanUrl(url);
@@ -390,7 +481,7 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const isMag = isMagnet(url);
   
   if (isMag) {
-    return await downloadTorrent(url, onProgress, abortSignal, skipZip);
+    return await downloadTorrent(url, onProgress, abortSignal, skipZip, onBatchComplete, startBatchIndex);
   }
 
   const d = new Date();
