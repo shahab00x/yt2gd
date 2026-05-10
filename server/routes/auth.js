@@ -91,10 +91,10 @@ router.post('/settings', requireAuth, (req, res) => {
   const current = loadSettings().googleDrive || {};
 
   updateGdriveSettings({
-    clientId: clientId ?? current.clientId,
+    clientId: clientId || current.clientId,
     clientSecret: clientSecret && clientSecret !== '••••••••' ? clientSecret : current.clientSecret,
-    redirectUri: redirectUri ?? current.redirectUri,
-    refreshToken: refreshToken ?? current.refreshToken
+    redirectUri: redirectUri || current.redirectUri,
+    refreshToken: refreshToken || current.refreshToken
   });
 
   if (req.body.torrentBatchSizeGB !== undefined) {
