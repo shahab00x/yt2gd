@@ -215,7 +215,7 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
  * @param {AbortSignal} abortSignal - Optional signal to abort the upload.
  * @returns {Promise<object>} - Uploaded folder metadata { id, name, webViewLink }.
  */
-export async function uploadFolderToGDrive(dirPath, folderName, onProgress = null, abortSignal = null) {
+export async function uploadFolderToGDrive(dirPath, folderName, onProgress = null, abortSignal = null, specificFiles = null) {
   const auth = getAuthClient();
   const drive = google.drive({ version: 'v3', auth });
 
@@ -239,9 +239,9 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   
   console.log(`📁 Created folder "${folderName}" (${torrentFolder.data.id})`);
 
-  // Recursively get all files in the directory
-  const allFilePaths = await getAllFiles(dirPath);
-  console.log(`📂 Found ${allFilePaths.length} files in directory (recursive)`);
+  // Recursively get all files in the directory if specificFiles is not provided
+  const allFilePaths = specificFiles || await getAllFiles(dirPath);
+  console.log(`📂 Found ${allFilePaths.length} files to upload`);
   const totalFiles = allFilePaths.length;
   let uploadedFiles = 0;
   let totalSize = 0;

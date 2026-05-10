@@ -420,14 +420,19 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             const actualDataDir = join(downloadDir, torrent.name || '');
             const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
 
+            torrent.pause(); // Pause WebTorrent to free up bandwidth and CPU for Google Drive upload
+            
             if (onBatchComplete) {
               await onBatchComplete({
                 dir: uploadSource,
                 name: torrent.name || torrentId,
                 batchIndex: i,
-                totalBatches: batches.length
+                totalBatches: batches.length,
+                files: batch.map(f => join(downloadDir, f.path))
               });
             }
+
+            torrent.resume(); // Resume downloading the next batch
 
             // Cleanup local files in this batch to free space
             for (const file of batch) {

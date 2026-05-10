@@ -152,7 +152,7 @@ router.post('/', async (req, res) => {
           percent: Math.round(percent),
           label: `Uploading batch ${batch.batchIndex + 1} · ${currentFile}`,
         });
-      }, signal);
+      }, signal, batch.files);
     };
 
     const downloadResult = await downloadFile(url, format, quality, cookiesPath, (line) => {
