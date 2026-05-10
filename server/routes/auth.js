@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
-import { loadSettings, updateGdriveSettings, updateCookiesPath } from '../services/settings.js';
+import { loadSettings, updateGdriveSettings, updateCookiesPath, updateBatchSize } from '../services/settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -98,7 +98,6 @@ router.post('/settings', requireAuth, (req, res) => {
   });
 
   if (req.body.torrentBatchSizeGB !== undefined) {
-    const { updateBatchSize } = await import('../services/settings.js');
     updateBatchSize(req.body.torrentBatchSizeGB);
   }
 
