@@ -471,6 +471,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
   });
 }
 
+/**
  * Download a URL using the best method available.
  */
 export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false, onBatchComplete = null, startBatchIndex = 0) {
