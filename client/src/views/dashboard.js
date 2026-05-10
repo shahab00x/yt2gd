@@ -221,6 +221,10 @@ export async function renderDashboard(username, onNavigate) {
            statusLabel = 'Paused (Disk/Drive Full)';
            badgeClass = 'badge-error';
         }
+        if (t.status === 'paused_user') {
+           statusLabel = 'Paused (Waiting for User)';
+           badgeClass = 'badge-error';
+        }
 
         const batchInfo = t.batch ? `<div class="file-meta">Batch ${t.batch} of ${t.totalBatches}</div>` : '';
 
@@ -232,7 +236,7 @@ export async function renderDashboard(username, onNavigate) {
               ${batchInfo}
             </div>
             <div style="display:flex; gap:8px;">
-              ${t.status === 'paused_quota' ? `<button class="btn btn-primary resume-btn" data-id="${id}" data-url="${t.url}" data-batch="${t.batch || 0}" style="padding:6px 12px; font-size:0.75rem;">Resume</button>` : ''}
+              ${t.status === 'paused_quota' || t.status === 'paused_user' ? `<button class="btn btn-primary resume-btn" data-id="${id}" data-url="${t.url}" data-batch="${t.batch || 0}" style="padding:6px 12px; font-size:0.75rem;">Resume</button>` : ''}
               <button class="btn btn-ghost cancel-active-btn" data-id="${id}" style="padding:6px 12px; font-size:0.75rem; color:var(--error);">Cancel</button>
             </div>
           </div>

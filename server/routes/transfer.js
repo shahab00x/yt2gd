@@ -165,6 +165,13 @@ router.post('/', async (req, res) => {
       const result = { success: true, fileName: downloadResult.torrentName, message: 'Torrent batch transfer complete.' };
       sendSSE('done', result);
       return res.json(result);
+    } else if (downloadResult.batchPaused) {
+      // One batch finished, waiting for user to resume next
+      updateTransferStatus(transferId, 'paused_user', { error: 'Waiting for user to resume next batch' });
+      // We send an 'error' event with a specific message to stop the client UI spinner,
+      // but because the status is 'paused_user', it will show up as resumable in the Active Transfers list.
+      sendSSE('error', { message: 'Batch complete. Please clear space and click Resume for the next batch.' });
+      return res.json({ success: true, message: 'Batch paused for user.' });
     }
 
     if (typeof downloadResult === 'string') {

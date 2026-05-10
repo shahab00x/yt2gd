@@ -383,73 +383,74 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             }
             currentBatch.push(file);
             currentBatchSize += file.length;
-          }
           if (currentBatch.length > 0) batches.push(currentBatch);
 
-          // Process each batch
-          for (let i = startBatchIndex; i < batches.length; i++) {
-            if (abortSignal?.aborted) throw new Error('Download cancelled by user.');
-            
-            const batch = batches[i];
-            batch.forEach(f => f.select());
-
-            console.log(`🚀 Starting Batch ${i + 1}/${batches.length} (${batch.length} files)`);
-
-            // Wait for batch to download
-            await new Promise((res, rej) => {
-              const onDownload = () => updateProgress(i, batches.length);
-              torrent.on('download', onDownload);
-              
-              const checkDone = setInterval(() => {
-                const batchDone = batch.every(f => f.progress === 1);
-                if (batchDone) {
-                  clearInterval(checkDone);
-                  torrent.removeListener('download', onDownload);
-                  res();
-                }
-                if (abortSignal?.aborted) {
-                  clearInterval(checkDone);
-                  rej(new Error('Download cancelled by user.'));
-                }
-              }, 2000);
-            });
-
-            console.log(`✅ Batch ${i + 1} complete. Triggering upload...`);
-            
-            // Determine the local path for this batch (relative to downloadDir)
-            const actualDataDir = join(downloadDir, torrent.name || '');
-            const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
-
-            torrent.pause(); // Pause WebTorrent to free up bandwidth and CPU for Google Drive upload
-            
-            if (onBatchComplete) {
-              await onBatchComplete({
-                dir: uploadSource,
-                name: torrent.name || torrentId,
-                batchIndex: i,
-                totalBatches: batches.length,
-                files: batch.map(f => join(downloadDir, f.path))
-              });
-            }
-
-            torrent.resume(); // Resume downloading the next batch
-
-            // Cleanup local files in this batch to free space
-            for (const file of batch) {
-              try {
-                const fullPath = join(downloadDir, file.path);
-                if (existsSync(fullPath)) unlinkSync(fullPath);
-              } catch (e) {
-                console.warn(`⚠️ Failed to delete ${file.name}: ${e.message}`);
-              }
-            }
-            
-            // Deselect to stop seeding/watching these files
-            batch.forEach(f => f.deselect());
+          // Process ONLY the requested batch
+          if (startBatchIndex >= batches.length) {
+            client.destroy();
+            resolve({ completed: true, torrentName: torrent.name });
+            return;
           }
 
-          client.destroy();
-          resolve({ completed: true, torrentName: torrent.name });
+          const batch = batches[startBatchIndex];
+          batch.forEach(f => f.select());
+
+          console.log(`🚀 Starting Batch ${startBatchIndex + 1}/${batches.length} (${batch.length} files)`);
+
+          // Wait for batch to download
+          await new Promise((res, rej) => {
+            const onDownload = () => updateProgress(startBatchIndex, batches.length);
+            torrent.on('download', onDownload);
+            
+            const checkDone = setInterval(() => {
+              const batchDone = batch.every(f => f.progress === 1);
+              if (batchDone) {
+                clearInterval(checkDone);
+                torrent.removeListener('download', onDownload);
+                res();
+              }
+              if (abortSignal?.aborted) {
+                clearInterval(checkDone);
+                rej(new Error('Download cancelled by user.'));
+              }
+            }, 2000);
+          });
+
+          console.log(`✅ Batch ${startBatchIndex + 1} complete. Triggering upload...`);
+          
+          // Determine the local path for this batch (relative to downloadDir)
+          const actualDataDir = join(downloadDir, torrent.name || '');
+          const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
+
+          torrent.pause(); // Pause WebTorrent to free up bandwidth and CPU for Google Drive upload
+          
+          if (onBatchComplete) {
+            await onBatchComplete({
+              dir: uploadSource,
+              name: torrent.name || torrentId,
+              batchIndex: startBatchIndex,
+              totalBatches: batches.length,
+              files: batch.map(f => join(downloadDir, f.path))
+            });
+          }
+
+          // Cleanup local files in this batch to free space
+          for (const file of batch) {
+            try {
+              const fullPath = join(downloadDir, file.path);
+              if (existsSync(fullPath)) unlinkSync(fullPath);
+            } catch (e) {
+              console.warn(`⚠️ Failed to delete ${file.name}: ${e.message}`);
+            }
+          }
+
+          client.destroy(); // Destroy client to fully release file locks and free disk space
+
+          if (startBatchIndex + 1 < batches.length) {
+            resolve({ batchPaused: true, torrentName: torrent.name });
+          } else {
+            resolve({ completed: true, torrentName: torrent.name });
+          }
 
         } catch (err) {
           client.destroy();
