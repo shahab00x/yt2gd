@@ -383,6 +383,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             }
             currentBatch.push(file);
             currentBatchSize += file.length;
+          }
           if (currentBatch.length > 0) batches.push(currentBatch);
 
           // Process ONLY the requested batch
