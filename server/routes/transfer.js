@@ -150,6 +150,8 @@ router.post('/', async (req, res) => {
     const effectiveTorrentMode = torrentMode || defaultTorrentMode;
     const skipZip = effectiveTorrentMode === 'folder';
 
+    let lastBatchInfo = null;
+
     // onBatchComplete callback for large torrents
     const onBatchComplete = async (batch) => {
       sendSSE('status', { phase: 'upload', message: `Uploading batch ${batch.batchIndex + 1}/${batch.totalBatches}…` });
@@ -159,7 +161,7 @@ router.post('/', async (req, res) => {
         name: batch.name
       });
 
-      await uploadFolderToGDrive(batch.dir, batch.name, ({ uploaded, total, speed, percent, currentFile }) => {
+      lastBatchInfo = await uploadFolderToGDrive(batch.dir, batch.name, ({ uploaded, total, speed, percent, currentFile }) => {
         sendSSE('progress', {
           phase: 'upload',
           uploaded,
@@ -178,10 +180,17 @@ router.post('/', async (req, res) => {
     if (downloadResult.completed) {
       // Large torrent batching finished
       deleteTransfer(transferId);
-      const result = { success: true, fileName: downloadResult.torrentName, message: 'Torrent batch transfer complete.' };
+      const result = { 
+        success: true, 
+        fileName: downloadResult.torrentName, 
+        message: 'Torrent batch transfer complete.',
+        folder: lastBatchInfo?.name || 'Drive',
+        webViewLink: lastBatchInfo?.webViewLink || null
+      };
       sendSSE('done', result);
       return res.json(result);
-    } else if (downloadResult.batchPaused) {
+    }
+ else if (downloadResult.batchPaused) {
       // One batch finished, waiting for user to resume next
       // Save nextBatchIndex and torrentMode so Resume can re-submit correctly
       updateTransferStatus(transferId, 'paused_user', {
