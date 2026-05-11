@@ -6,6 +6,7 @@ import axios from 'axios';
 import WebTorrent from 'webtorrent';
 import archiver from 'archiver';
 import { loadSettings } from './settings.js';
+import { getDiskUsage } from './system_utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -423,12 +424,22 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             if (abortSignal) abortSignal.addEventListener('abort', onAbort);
 
             const checkDone = setInterval(() => {
+              // --- DISK SPACE FAILSAFE ---
+              // Check if free space is below 500MB
+              try {
+                const usage = getDiskUsage();
+                if (usage.free > 0 && usage.free < 500 * 1024 * 1024) {
+                  cleanup();
+                  rej(new Error('DISK_SPACE_LOW: Less than 500MB remaining on VPS. Pausing for safety.'));
+                }
+              } catch (e) { /* ignore check errors */ }
+
               const batchDone = batch.every(f => f.progress === 1);
               if (batchDone) {
                 cleanup();
                 res();
               }
-            }, 500);
+            }, 1000);
 
             function cleanup() {
               clearInterval(checkDone);
@@ -437,21 +448,27 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             }
           });
 
-          console.log(`✅ Batch ${startBatchIndex + 1} complete. Triggering upload...`);
+          console.log(`✅ Batch ${startBatchIndex + 1} complete. Preparing for upload...`);
           
-          // Determine the local path for this batch (relative to downloadDir)
-          const actualDataDir = join(downloadDir, torrent.name || '');
+          // Extract necessary data before destroying the client
+          const tName = torrent.name || torrentId;
+          const actualDataDir = join(downloadDir, tName);
           const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
+          const mappedFiles = batch.map(f => join(downloadDir, f.path));
 
-          torrent.pause(); // Pause WebTorrent to free up bandwidth and CPU for Google Drive upload
-          
+          // **CRITICAL FIX**: Completely destroy the client BEFORE uploading.
+          // torrent.pause() is not enough; WebTorrent continues to allocate sparse files 
+          // and write pieces in the background, which fills the disk and starves the upload I/O.
+          client.destroy(); 
+          console.log(`🛑 WebTorrent client destroyed to free disk I/O and prevent further allocation.`);
+
           if (onBatchComplete) {
             await onBatchComplete({
               dir: uploadSource,
-              name: torrent.name || torrentId,
+              name: tName,
               batchIndex: startBatchIndex,
               totalBatches: batches.length,
-              files: batch.map(f => join(downloadDir, f.path))
+              files: mappedFiles
             });
           }
 
@@ -463,12 +480,11 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             console.warn(`⚠️ Failed to clean download dir: ${e.message}`);
           }
 
-          client.destroy(); // Destroy client to fully release file locks and free disk space
 
           if (startBatchIndex + 1 < batches.length) {
-            resolve({ batchPaused: true, torrentName: torrent.name, downloadDir });
+            resolve({ batchPaused: true, torrentName: tName, downloadDir });
           } else {
-            resolve({ completed: true, torrentName: torrent.name, downloadDir });
+            resolve({ completed: true, torrentName: tName, downloadDir });
           }
 
         } catch (err) {
