@@ -380,10 +380,14 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
         console.log(`📦 Large torrent detected. Processing in ${settings.torrentBatchSizeGB}GB batches.`);
         
         try {
-          // Deselect all files initially
-          torrent.files.forEach(f => f.deselect());
+          // --- STRICT PIECE-LEVEL BATCHING ---
+          const tName = torrent.name || torrentId;
 
-          // Group files into batches
+          // 1. Deselect ALL pieces in the torrent immediately to stop all background activity
+          // This prevents WebTorrent from requesting any data for unselected files.
+          torrent.deselect(0, torrent.pieces.length - 1, false);
+
+          // 2. Group files into batches (deterministic calculation)
           const batches = [];
           let currentBatch = [];
           let currentBatchSize = 0;
@@ -399,17 +403,32 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           }
           if (currentBatch.length > 0) batches.push(currentBatch);
 
-          // Process ONLY the requested batch
+          // 3. Process ONLY the requested batch
           if (startBatchIndex >= batches.length) {
             client.destroy();
-            resolve({ completed: true, torrentName: torrent.name });
+            resolve({ completed: true, torrentName: tName });
             return;
           }
 
           const batch = batches[startBatchIndex];
-          batch.forEach(f => f.select());
+          
+          // 4. Calculate piece range for the current batch
+          // We find the byte range of the entire batch and select all pieces that overlap it
+          const firstFile = batch[0];
+          const lastFile = batch[batch.length - 1];
+          const startByte = firstFile.offset;
+          const endByte = lastFile.offset + lastFile.length - 1;
+          
+          const startPiece = Math.floor(startByte / torrent.pieceLength);
+          const endPiece = Math.floor(endByte / torrent.pieceLength);
 
-          console.log(`🚀 Starting Batch ${startBatchIndex + 1}/${batches.length} (${batch.length} files)`);
+          console.log(`🚀 Starting Batch ${startBatchIndex + 1}/${batches.length} (${batch.length} files, Pieces ${startPiece}-${endPiece})`);
+
+          // 5. Select ONLY the pieces for this batch (Strict Piece Blocking)
+          torrent.select(startPiece, endPiece, 1); // Priority 1
+
+          // Also select the files themselves for WebTorrent's internal tracking
+          batch.forEach(f => f.select());
 
           // Wait for batch to download
           await new Promise((res, rej) => {
@@ -451,7 +470,6 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           console.log(`✅ Batch ${startBatchIndex + 1} complete. Preparing for upload...`);
           
           // Extract necessary data before destroying the client
-          const tName = torrent.name || torrentId;
           const actualDataDir = join(downloadDir, tName);
           const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
           const mappedFiles = batch.map(f => join(downloadDir, f.path));
