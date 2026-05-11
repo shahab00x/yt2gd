@@ -35,6 +35,8 @@ export const api = {
   getCookiesStatus: () => request('GET', '/auth/cookies/status'),
   deleteCookies: () => request('DELETE', '/auth/cookies'),
   getTransferList: () => request('GET', '/transfer/list'),
+  getSystemStatus: () => request('GET', '/system/status'),
+  clearTmp: () => request('POST', '/system/clear-tmp'),
 
   /**
    * Upload a cookies.txt file (multipart/form-data).

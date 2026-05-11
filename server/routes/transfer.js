@@ -116,6 +116,14 @@ router.post('/', async (req, res) => {
     }
   }
 
+  // Clean up any old paused transfers for the same URL (prevents ghost duplicates on resume)
+  const existingTransfers = getTransfers();
+  for (const [id, t] of Object.entries(existingTransfers)) {
+    if (t.url === url && (t.status === 'paused_user' || t.status === 'paused_quota')) {
+      deleteTransfer(id);
+    }
+  }
+
   saveTransfer(transferId, { url, type: 'download', status: 'initializing', torrentMode: torrentMode || null });
 
   let localPath = null;

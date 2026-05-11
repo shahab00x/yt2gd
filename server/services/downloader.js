@@ -414,19 +414,27 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           await new Promise((res, rej) => {
             const onDownload = () => updateProgress(startBatchIndex, batches.length);
             torrent.on('download', onDownload);
-            
+
+            // Instant abort detection via signal listener
+            const onAbort = () => {
+              cleanup();
+              rej(new Error('Download cancelled by user.'));
+            };
+            if (abortSignal) abortSignal.addEventListener('abort', onAbort);
+
             const checkDone = setInterval(() => {
               const batchDone = batch.every(f => f.progress === 1);
               if (batchDone) {
-                clearInterval(checkDone);
-                torrent.removeListener('download', onDownload);
+                cleanup();
                 res();
               }
-              if (abortSignal?.aborted) {
-                clearInterval(checkDone);
-                rej(new Error('Download cancelled by user.'));
-              }
-            }, 2000);
+            }, 500);
+
+            function cleanup() {
+              clearInterval(checkDone);
+              torrent.removeListener('download', onDownload);
+              if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+            }
           });
 
           console.log(`✅ Batch ${startBatchIndex + 1} complete. Triggering upload...`);
@@ -447,22 +455,20 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             });
           }
 
-          // Cleanup local files in this batch to free space
-          for (const file of batch) {
-            try {
-              const fullPath = join(downloadDir, file.path);
-              if (existsSync(fullPath)) unlinkSync(fullPath);
-            } catch (e) {
-              console.warn(`⚠️ Failed to delete ${file.name}: ${e.message}`);
-            }
+          // Cleanup entire download directory to free disk space
+          try {
+            if (existsSync(downloadDir)) rmSync(downloadDir, { recursive: true, force: true });
+            console.log(`🧹 Cleaned up download directory: ${downloadDir}`);
+          } catch (e) {
+            console.warn(`⚠️ Failed to clean download dir: ${e.message}`);
           }
 
           client.destroy(); // Destroy client to fully release file locks and free disk space
 
           if (startBatchIndex + 1 < batches.length) {
-            resolve({ batchPaused: true, torrentName: torrent.name });
+            resolve({ batchPaused: true, torrentName: torrent.name, downloadDir });
           } else {
-            resolve({ completed: true, torrentName: torrent.name });
+            resolve({ completed: true, torrentName: torrent.name, downloadDir });
           }
 
         } catch (err) {

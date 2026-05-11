@@ -7,6 +7,7 @@ import { existsSync } from 'fs';
 import { clearTmp } from './services/downloader.js';
 import authRoutes from './routes/auth.js';
 import transferRoutes from './routes/transfer.js';
+import systemRoutes from './routes/system.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +34,7 @@ app.use(session({
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/transfer', transferRoutes);
+app.use('/api/system', systemRoutes);
 
 // Serve the Vite production build (when running in production)
 const clientDistPath = join(__dirname, '../client/dist');

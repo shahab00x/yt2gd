@@ -226,18 +226,9 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   const dateFolderName = getTodayFolderName();
   const dateFolderId = await findOrCreateFolder(drive, dateFolderName, rootFolderId);
 
-  // Create a new folder for the torrent
-  const torrentFolderMeta = {
-    name: folderName,
-    mimeType: 'application/vnd.google-apps.folder',
-    parents: [dateFolderId]
-  };
-  const torrentFolder = await drive.files.create({
-    requestBody: torrentFolderMeta,
-    fields: 'id, name, webViewLink'
-  });
-  
-  console.log(`📁 Created folder "${folderName}" (${torrentFolder.data.id})`);
+  // Find or create the torrent folder (reuses existing folder across batches)
+  const torrentFolderId = await findOrCreateFolder(drive, folderName, dateFolderId);
+  const torrentFolderData = { id: torrentFolderId, name: folderName };
 
   // Recursively get all files in the directory if specificFiles is not provided
   const allFilePaths = specificFiles || await getAllFiles(dirPath);
@@ -277,7 +268,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     const subPath = pathParts.join('/'); // The rest is the folder path
     
     // Ensure the subfolder structure exists on Drive
-    const targetFolderId = await ensureFolderStructure(drive, subPath, torrentFolder.data.id, folderCache);
+    const targetFolderId = await ensureFolderStructure(drive, subPath, torrentFolderId, folderCache);
 
     console.log(`⬆️  Uploading "${relativePath}" (${(fileSize / 1024 / 1024).toFixed(2)} MB) [${uploadedFiles + 1}/${totalFiles}]`);
 
@@ -356,5 +347,5 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   }
 
   console.log(`✅ Uploaded ${uploadedFiles} files to folder "${folderName}"`);
-  return torrentFolder.data;
+  return torrentFolderData;
 }

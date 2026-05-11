@@ -180,6 +180,17 @@ export async function renderDashboard(username, onNavigate) {
            </div>
         </div>
 
+        <!-- System Status -->
+        <div class="card fade-up" style="animation-delay: 0.05s">
+          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>💾 System Status</span>
+            <button id="clear-tmp-btn" class="btn btn-ghost" style="padding:4px 10px; font-size:0.75rem; color:var(--error);">Clear Tmp</button>
+          </div>
+          <div id="system-status-container">
+            <div class="file-meta">Loading...</div>
+          </div>
+        </div>
+
         <!-- History Card -->
         <div class="card fade-up" style="animation-delay: 0.1s">
           <div class="card-title">📋 Recent Transfers</div>
@@ -270,11 +281,72 @@ export async function renderDashboard(username, onNavigate) {
 
   refreshActiveTransfers();
   const pollInterval = setInterval(refreshActiveTransfers, 5000);
+
+  // --- System Status Widget ---
+  const systemContainer = document.getElementById('system-status-container');
+
+  function fmtSize(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  }
+
+  async function refreshSystemStatus() {
+    try {
+      const data = await api.getSystemStatus();
+      const diskPercent = data.disk.total > 0 ? ((data.disk.used / data.disk.total) * 100).toFixed(0) : 0;
+      const diskColor = diskPercent > 90 ? 'var(--error)' : diskPercent > 70 ? '#f0ad4e' : 'var(--success)';
+
+      let tmpItems = '';
+      if (data.tmp.contents.length > 0) {
+        tmpItems = data.tmp.contents.map(f =>
+          `<div class="file-meta" style="padding:2px 0;">  ${f.isDir ? '📁' : '📄'} ${f.name} — ${fmtSize(f.size)}</div>`
+        ).join('');
+      } else {
+        tmpItems = '<div class="file-meta" style="padding:2px 0;">  (empty)</div>';
+      }
+
+      systemContainer.innerHTML = `
+        <div style="margin-bottom:8px;">
+          <div class="file-meta" style="margin-bottom:4px;">Disk: ${fmtSize(data.disk.used)} / ${fmtSize(data.disk.total)} (${diskPercent}% used)</div>
+          <div style="background:var(--bg-elevated); border-radius:4px; height:8px; overflow:hidden;">
+            <div style="background:${diskColor}; height:100%; width:${diskPercent}%; transition:width 0.3s;"></div>
+          </div>
+        </div>
+        <div>
+          <div class="file-meta" style="margin-bottom:2px;">Tmp folder: ${fmtSize(data.tmp.size)}</div>
+          ${tmpItems}
+        </div>
+      `;
+    } catch (err) {
+      systemContainer.innerHTML = `<div class="file-meta" style="color:var(--error);">Failed to load system status</div>`;
+    }
+  }
+
+  refreshSystemStatus();
+  const systemPoll = setInterval(refreshSystemStatus, 10000);
+
+  document.getElementById('clear-tmp-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('clear-tmp-btn');
+    btn.disabled = true;
+    btn.textContent = 'Clearing...';
+    try {
+      await api.clearTmp();
+      await refreshSystemStatus();
+    } catch (err) {
+      console.error('Failed to clear tmp:', err);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Clear Tmp';
+  });
   
-  // Clean up interval on navigation
+  // Clean up intervals on navigation
   const originalOnNavigate = onNavigate;
   onNavigate = (target) => {
     clearInterval(pollInterval);
+    clearInterval(systemPoll);
     originalOnNavigate(target);
   };
 
