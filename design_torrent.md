@@ -39,4 +39,9 @@ graph TD
 ### Dashboard View (`client/src/views/dashboard.js`)
 - Update `isYouTubeUrl` logic to also include `isMagnetUrl`.
 - Update UI to show a "Torrent" indicator when a magnet link is detected.
+- **[NEW]** Add a "Start Batch Index" input in the Torrent Options section.
 - Enhance progress display to show "Peers" when downloading a torrent.
+
+### Google Drive Service (`server/services/gdrive.js`)
+- **[UPDATE]** Replace string-based path replacement with `path.relative()` for deterministic relative path calculation.
+- **[NEW]** Implement exponential backoff retry logic for resumable uploads to handle network instability.

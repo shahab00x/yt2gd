@@ -12,4 +12,7 @@ Add the capability to download content via magnet links, package them into a ZIP
 - **When** the ZIP archive is created, the **system** shall upload it to the user's Google Drive using the existing upload pipeline.
 - **When** the upload to Google Drive completes (successfully or with an error), the **system** shall delete both the temporary torrent files and the generated ZIP archive.
 - **When** the ZIP archive is created, the **system** shall use the torrent's display name as the base filename for the archive.
-- **When** a non-magnet URL is submitted, the **system** shall maintain its existing behavior for YouTube and direct file links.
+- **When** a torrent download is initiated in folder mode and exceeds the configured batch size, the **system** shall divide the download into sequential batches.
+- **When** a batch download is initiated, the **system** shall allow the user to specify a starting batch index.
+- **When** a batch upload fails due to network errors, the **system** shall attempt to retry the upload for the specific batch.
+- **When** a batch completes, the **system** shall provide an option to resume the next batch or wait for user confirmation.

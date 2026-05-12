@@ -138,14 +138,20 @@ export async function renderDashboard(username, onNavigate) {
 
           <!-- Torrent options (hidden until magnet URL is detected) -->
           <div id="torrent-options" style="display:none; margin-top:16px;">
-            <div class="form-group" style="margin:0;">
-              <label for="torrent-mode" style="font-size:0.82rem;">Upload Mode</label>
-              <select id="torrent-mode" class="form-control" style="padding:8px 10px;">
-                <option value="zip">🗜️ ZIP (single file)</option>
-                <option value="folder">📁 Folder (saves disk space)</option>
-              </select>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+              <div class="form-group" style="margin:0; flex:1; min-width:140px;">
+                <label for="torrent-mode" style="font-size:0.82rem;">Upload Mode</label>
+                <select id="torrent-mode" class="form-control" style="padding:8px 10px;">
+                  <option value="zip">🗜️ ZIP (single file)</option>
+                  <option value="folder">📁 Folder (saves disk space)</option>
+                </select>
+              </div>
+              <div id="batch-selection-group" class="form-group" style="margin:0; flex:1; min-width:140px; display:none;">
+                <label for="torrent-start-batch" style="font-size:0.82rem;">Start from Batch</label>
+                <input id="torrent-start-batch" class="form-control" type="number" min="1" value="1" style="padding:8px 10px;" />
+              </div>
             </div>
-            <p class="hint" style="margin-top:8px;">💡 Folder mode uploads files directly to Drive without zipping, using less disk space.</p>
+            <p class="hint" style="margin-top:8px;">💡 Folder mode uploads files directly to Drive without zipping. You can start from a specific batch if needed.</p>
           </div>
 
           <p class="hint" id="url-hint" style="margin-top:8px;">Paste a YouTube link or a direct file URL.</p>
@@ -367,10 +373,21 @@ export async function renderDashboard(username, onNavigate) {
       ytOptions.style.display = 'none';
       torrentOptions.style.display = 'block';
       urlHint.innerHTML = '🧲 Magnet link detected. Choose upload mode.';
+      // Trigger mode change logic to show/hide batch input
+      document.getElementById('torrent-mode').dispatchEvent(new Event('change'));
     } else {
       ytOptions.style.display = 'none';
       torrentOptions.style.display = 'none';
       urlHint.innerHTML = 'Paste a YouTube link, a Magnet link, or a direct file URL.';
+    }
+  });
+
+  document.getElementById('torrent-mode').addEventListener('change', (e) => {
+    const group = document.getElementById('batch-selection-group');
+    if (e.target.value === 'folder') {
+      group.style.display = 'block';
+    } else {
+      group.style.display = 'none';
     }
   });
 
@@ -404,7 +421,12 @@ export async function renderDashboard(username, onNavigate) {
     const quality = document.getElementById('yt-quality')?.value || 'best';
     const isLive = document.getElementById('yt-live')?.checked || false;
     const torrentMode = document.getElementById('torrent-mode')?.value || null;
-    const startBatchIndex = parseInt(fileUrlInput.dataset.startBatch || '0', 10);
+    
+    let startBatchIndex = parseInt(fileUrlInput.dataset.startBatch || '0', 10);
+    if (!startBatchIndex && torrentMode === 'folder') {
+      const manualBatch = parseInt(document.getElementById('torrent-start-batch')?.value || '1', 10);
+      startBatchIndex = Math.max(0, manualBatch - 1);
+    }
     delete fileUrlInput.dataset.startBatch;
 
     // Reset UI

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join, basename } from 'path';
+import { dirname, join, basename, normalize } from 'path';
 import { create } from 'youtube-dl-exec';
 import axios from 'axios';
 import WebTorrent from 'webtorrent';
@@ -470,9 +470,9 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           console.log(`✅ Batch ${startBatchIndex + 1} complete. Preparing for upload...`);
           
           // Extract necessary data before destroying the client
-          const actualDataDir = join(downloadDir, tName);
+          const actualDataDir = normalize(join(downloadDir, tName));
           const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
-          const mappedFiles = batch.map(f => join(downloadDir, f.path));
+          const mappedFiles = batch.map(f => normalize(join(downloadDir, f.path)));
 
           // **CRITICAL FIX**: Completely destroy the client BEFORE uploading.
           // torrent.pause() is not enough; WebTorrent continues to allocate sparse files 

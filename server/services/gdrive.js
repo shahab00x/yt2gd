@@ -1,7 +1,7 @@
 import { google } from 'googleapis';
 import { createReadStream, statSync } from 'fs';
 import { readdir } from 'fs/promises';
-import { basename, join, sep } from 'path';
+import { basename, join, sep, relative } from 'path';
 import { loadSettings } from './settings.js';
 import progressStream from 'progress-stream';
 
@@ -122,6 +122,29 @@ export function getTodayFolderName() {
 }
 
 /**
+ * Helper to retry an async function with exponential backoff.
+ */
+async function withRetry(fn, maxRetries = 3, initialDelay = 1000) {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const isQuotaError = err.errors && err.errors.some(e => e.reason === 'storageQuotaExceeded' || e.message?.toLowerCase().includes('quota exceeded'));
+      if (isQuotaError) throw err; // Don't retry quota errors
+      
+      if (i < maxRetries - 1) {
+        const delay = initialDelay * Math.pow(2, i);
+        console.warn(`⚠️ Upload failed (attempt ${i + 1}/${maxRetries}), retrying in ${delay}ms... Error: ${err.message}`);
+        await new Promise(res => setTimeout(res, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Upload a local file to Google Drive under yt2gd/Month_Day/.
  * @param {string} filePath - Absolute path to the local file.
  * @param {function} onProgress - Called with { uploaded, total, speed, percent }
@@ -174,7 +197,7 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
   if (abortSignal) abortSignal.addEventListener('abort', onAbort);
 
   try {
-    const res = await drive.files.create({
+    const res = await withRetry(() => drive.files.create({
       uploadType: 'resumable',
       requestBody: {
         name: fileName,
@@ -191,7 +214,7 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
         // Option 1: use library's native progress if needed
         // but we already use progress-stream (prog) which is more precise for streams
       }
-    });
+    }));
 
     console.log(`✅ Uploaded "${fileName}" → Drive ID: ${res.data.id}`);
     return res.data;
@@ -261,8 +284,8 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     const fileSize = stats.size;
     
     // Get relative path for the filename (preserve directory structure)
-    // On Windows, dirPath might have backslashes, normalize to forward slashes for Drive logic
-    const relativePath = filePath.replace(dirPath + sep, '').replace(/\\/g, '/');
+    const rel = relative(dirPath, filePath);
+    const relativePath = rel.replace(/\\/g, '/'); // Normalize to forward slashes for Drive
     const pathParts = relativePath.split('/');
     const fileName = pathParts.pop(); // The last part is the file name
     const subPath = pathParts.join('/'); // The rest is the folder path
@@ -301,7 +324,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     if (abortSignal) abortSignal.addEventListener('abort', onAbort);
 
     try {
-      await drive.files.create({
+      await withRetry(() => drive.files.create({
         uploadType: 'resumable',
         requestBody: {
           name: fileName,
@@ -313,7 +336,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
         fields: 'id'
       }, {
         signal: abortSignal
-      });
+      }));
       console.log(`✅ Uploaded "${relativePath}" successfully`);
       uploadedFiles++;
       totalUploaded += fileSize;
