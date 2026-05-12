@@ -177,6 +177,7 @@ router.post('/', async (req, res) => {
       sendSSE('progress', { phase: 'download', line });
     }, signal, isLive, skipZip, onBatchComplete, startBatchIndex);
 
+    console.log(`🔍 Download result:`, downloadResult);
     if (downloadResult.completed) {
       // Large torrent batching finished
       deleteTransfer(transferId);
@@ -192,6 +193,7 @@ router.post('/', async (req, res) => {
     }
  else if (downloadResult.batchPaused) {
       // One batch finished, waiting for user to resume next
+      console.log(`✅ Saving transfer as paused_user for resume (nextBatchIndex=${startBatchIndex + 1})`);
       // Save nextBatchIndex and torrentMode so Resume can re-submit correctly
       updateTransferStatus(transferId, 'paused_user', {
         nextBatchIndex: startBatchIndex + 1,

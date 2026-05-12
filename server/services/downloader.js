@@ -499,9 +499,12 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           }
 
 
+          console.log(`🔍 Batch check: startBatchIndex=${startBatchIndex}, batches.length=${batches.length}, moreBatches=${startBatchIndex + 1 < batches.length}`);
           if (startBatchIndex + 1 < batches.length) {
+            console.log(`✅ Returning batchPaused=true for next batch`);
             resolve({ batchPaused: true, torrentName: tName, downloadDir });
           } else {
+            console.log(`✅ All batches completed, returning completed=true`);
             resolve({ completed: true, torrentName: tName, downloadDir });
           }
 
