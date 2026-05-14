@@ -9,6 +9,11 @@ import progressStream from 'progress-stream';
  * Recursively get all files in a directory.
  */
 async function getAllFiles(dirPath, fileList = []) {
+  const stats = statSync(dirPath);
+  if (stats.isFile()) {
+    fileList.push(dirPath);
+    return fileList;
+  }
   const files = await readdir(dirPath);
   
   for (const file of files) {
@@ -286,8 +291,8 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
     // Get relative path for the filename (preserve directory structure)
     const rel = relative(dirPath, filePath);
     const relativePath = rel.replace(/\\/g, '/'); // Normalize to forward slashes for Drive
-    const pathParts = relativePath.split('/');
-    const fileName = pathParts.pop(); // The last part is the file name
+    const pathParts = relativePath.split('/').filter(p => p);
+    const fileName = pathParts.length > 0 ? pathParts.pop() : basename(filePath);
     const subPath = pathParts.join('/'); // The rest is the folder path
     
     // Ensure the subfolder structure exists on Drive

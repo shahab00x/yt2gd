@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, basename, normalize } from 'path';
 import { create } from 'youtube-dl-exec';
@@ -298,7 +298,12 @@ async function zipDirectory(sourceDir, outPath) {
     archive.on('error', (err) => reject(err));
 
     archive.pipe(output);
-    archive.directory(sourceDir, false);
+    const stats = statSync(sourceDir);
+    if (stats.isFile()) {
+      archive.file(sourceDir, { name: basename(sourceDir) });
+    } else {
+      archive.directory(sourceDir, false);
+    }
     archive.finalize();
   });
 }
@@ -356,7 +361,11 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           const safeName = (torrent.name || torrentId).replace(/[^a-z0-9. _-]/gi, '_');
           // If it's a folder-style torrent, the actual files are in a subfolder named torrent.name
           const actualDataDir = join(downloadDir, torrent.name || '');
-          const uploadPath = existsSync(actualDataDir) ? actualDataDir : downloadDir;
+          // If actualDataDir is a file, we use downloadDir as uploadPath to avoid ENOTDIR
+          let uploadPath = downloadDir;
+          if (existsSync(actualDataDir) && statSync(actualDataDir).isDirectory()) {
+            uploadPath = actualDataDir;
+          }
 
           if (skipZip) {
             client.destroy();
@@ -471,7 +480,11 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           
           // Extract necessary data before destroying the client
           const actualDataDir = normalize(join(downloadDir, tName));
-          const uploadSource = existsSync(actualDataDir) ? actualDataDir : downloadDir;
+          // If actualDataDir is a file, we use downloadDir as uploadSource
+          let uploadSource = downloadDir;
+          if (existsSync(actualDataDir) && statSync(actualDataDir).isDirectory()) {
+            uploadSource = actualDataDir;
+          }
           const mappedFiles = batch.map(f => normalize(join(downloadDir, f.path)));
 
           // **CRITICAL FIX**: Completely destroy the client BEFORE uploading.
