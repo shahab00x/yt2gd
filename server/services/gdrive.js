@@ -128,12 +128,13 @@ export function getTodayFolderName() {
 
 /**
  * Helper to retry an async function with exponential backoff.
+ * @param {Function} fn - The async function to retry.
  */
 async function withRetry(fn, maxRetries = 3, initialDelay = 1000) {
   let lastError;
   for (let i = 0; i < maxRetries; i++) {
     try {
-      return await fn();
+      return await fn(i); // Pass the attempt index if needed
     } catch (err) {
       lastError = err;
       const isQuotaError = err.errors && err.errors.some(e => e.reason === 'storageQuotaExceeded' || e.message?.toLowerCase().includes('quota exceeded'));
@@ -172,54 +173,49 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
 
   console.log(`⬆️  Uploading "${fileName}" (${(fileSize / 1024 / 1024).toFixed(2)} MB)...`);
 
-  // Wrap the read stream with progress tracking
-  const prog = progressStream({ length: fileSize, time: 500 });
-  prog.on('progress', (data) => {
-    if (onProgress) {
-      onProgress({
-        uploaded: data.transferred,
-        total: data.length,
-        speed: data.speed,
-        percent: data.percentage,
-      });
-    }
-  });
-
-  const rawStream = createReadStream(filePath);
-  const body = rawStream.pipe(prog);
-
-  // If aborted before we even start
-  if (abortSignal?.aborted) {
-    rawStream.destroy();
-    throw new Error('Upload was cancelled by user.');
-  }
-
-  // Handle abort during upload
-  const onAbort = () => {
-    console.log(`🛑 Google Drive upload cancelled for ${fileName}`);
-    rawStream.destroy();
-  };
-  if (abortSignal) abortSignal.addEventListener('abort', onAbort);
-
   try {
-    const res = await withRetry(() => drive.files.create({
-      uploadType: 'resumable',
-      requestBody: {
-        name: fileName,
-        parents: [dateFolderId]
-      },
-      media: {
-        body,
-      },
-      fields: 'id, name, webViewLink'
-    }, {
-      signal: abortSignal,
-      // Resumable uploads are much more robust for large files
-      onUploadProgress: (evt) => {
-        // Option 1: use library's native progress if needed
-        // but we already use progress-stream (prog) which is more precise for streams
+    const res = await withRetry(async (attempt) => {
+      // Re-create the stream on every attempt to avoid "stream ended" errors
+      const prog = progressStream({ length: fileSize, time: 500 });
+      prog.on('progress', (data) => {
+        if (onProgress) {
+          onProgress({
+            uploaded: data.transferred,
+            total: data.length,
+            speed: data.speed,
+            percent: data.percentage,
+          });
+        }
+      });
+
+      const rawStream = createReadStream(filePath);
+      const body = rawStream.pipe(prog);
+
+      // Handle abort during upload
+      const onAbort = () => {
+        console.log(`🛑 Google Drive upload cancelled for ${fileName}`);
+        rawStream.destroy();
+      };
+      if (abortSignal) abortSignal.addEventListener('abort', onAbort);
+
+      try {
+        return await drive.files.create({
+          uploadType: 'resumable',
+          requestBody: {
+            name: fileName,
+            parents: [dateFolderId]
+          },
+          media: {
+            body,
+          },
+          fields: 'id, name, webViewLink'
+        }, {
+          signal: abortSignal
+        });
+      } finally {
+        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
       }
-    }));
+    });
 
     console.log(`✅ Uploaded "${fileName}" → Drive ID: ${res.data.id}`);
     return res.data;
@@ -300,48 +296,55 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
 
     console.log(`⬆️  Uploading "${relativePath}" (${(fileSize / 1024 / 1024).toFixed(2)} MB) [${uploadedFiles + 1}/${totalFiles}]`);
 
-    // Wrap the read stream with progress tracking
-    const prog = progressStream({ length: fileSize, time: 500 });
-    prog.on('progress', (data) => {
-      if (onProgress) {
-        const currentFileUploaded = data.transferred;
-        const uploadedSoFar = totalUploaded + currentFileUploaded;
-        const speed = data.speed;
-        const percent = (uploadedSoFar / totalSize) * 100;
-        onProgress({
-          uploaded: uploadedSoFar,
-          total: totalSize,
-          speed,
-          percent,
-          currentFile: relativePath,
-          currentFileProgress: (data.transferred / fileSize) * 100
-        });
-      }
-    });
-
-    const rawStream = createReadStream(filePath);
-    const body = rawStream.pipe(prog);
-
-    const onAbort = () => {
-      console.log(`🛑 Upload cancelled for ${relativePath}`);
-      rawStream.destroy();
-    };
-    if (abortSignal) abortSignal.addEventListener('abort', onAbort);
-
     try {
-      await withRetry(() => drive.files.create({
-        uploadType: 'resumable',
-        requestBody: {
-          name: fileName,
-          parents: [targetFolderId]
-        },
-        media: {
-          body,
-        },
-        fields: 'id'
-      }, {
-        signal: abortSignal
-      }));
+      await withRetry(async (attempt) => {
+        // Re-create the stream on every attempt
+        const prog = progressStream({ length: fileSize, time: 500 });
+        prog.on('progress', (data) => {
+          if (onProgress) {
+            const currentFileUploaded = data.transferred;
+            const uploadedSoFar = totalUploaded + currentFileUploaded;
+            const speed = data.speed;
+            const percent = (uploadedSoFar / totalSize) * 100;
+            onProgress({
+              uploaded: uploadedSoFar,
+              total: totalSize,
+              speed,
+              percent,
+              currentFile: relativePath,
+              currentFileProgress: (data.transferred / fileSize) * 100
+            });
+          }
+        });
+
+        const rawStream = createReadStream(filePath);
+        const body = rawStream.pipe(prog);
+
+        const onAbort = () => {
+          console.log(`🛑 Upload cancelled for ${relativePath}`);
+          rawStream.destroy();
+        };
+        if (abortSignal) abortSignal.addEventListener('abort', onAbort);
+
+        try {
+          return await drive.files.create({
+            uploadType: 'resumable',
+            requestBody: {
+              name: fileName,
+              parents: [targetFolderId]
+            },
+            media: {
+              body,
+            },
+            fields: 'id'
+          }, {
+            signal: abortSignal
+          });
+        } finally {
+          if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+        }
+      });
+
       console.log(`✅ Uploaded "${relativePath}" successfully`);
       uploadedFiles++;
       totalUploaded += fileSize;

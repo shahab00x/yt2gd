@@ -9,3 +9,7 @@
 
 ## 2. Torrent Folder Naming
 - **When** a torrent in folder mode is uploaded to Google Drive, the system **shall** use the actual torrent name for the root folder instead of a generic timestamp identifier.
+
+## 3. Upload Reliability & Integrity
+- **When** a file upload to Google Drive fails due to network instability or transient errors, the system **shall** retry the upload with a fresh file stream to ensure data integrity.
+- **When** a file upload within a batch fails even after retries, the system **shall** report the specific failure but attempt to continue with other files if possible, or at least maintain a clear status of what was uploaded.

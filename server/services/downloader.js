@@ -479,11 +479,20 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           console.log(`✅ Batch ${startBatchIndex + 1} complete. Preparing for upload...`);
           
           // Extract necessary data before destroying the client
-          const actualDataDir = normalize(join(downloadDir, tName));
-          // If actualDataDir is a file, we use downloadDir as uploadSource
           let uploadSource = downloadDir;
-          if (existsSync(actualDataDir) && statSync(actualDataDir).isDirectory()) {
-            uploadSource = actualDataDir;
+          try {
+            const items = readdirSync(downloadDir);
+            const foundDir = items.find(i => {
+              try {
+                return statSync(join(downloadDir, i)).isDirectory();
+              } catch { return false; }
+            });
+            if (foundDir) {
+              uploadSource = join(downloadDir, foundDir);
+              console.log(`📁 Detected data directory: ${foundDir}`);
+            }
+          } catch (e) {
+            console.warn(`⚠️ Could not list downloadDir for detection: ${e.message}`);
           }
           const mappedFiles = batch.map(f => normalize(join(downloadDir, f.path)));
 

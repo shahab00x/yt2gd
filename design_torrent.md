@@ -4,6 +4,7 @@
 - **Torrent Client**: `webtorrent`
 - **Compression**: `archiver`
 - **File System**: `fs/promises` for cleanup
+- **Uploads**: `googleapis` (Drive v3)
 
 ## Data Flow
 ```mermaid
@@ -12,36 +13,31 @@ graph TD
     B -- Magnet --> C[TorrentDownloader]
     C --> D[WebTorrent: Download to /tmp/torrent_id/]
     D -- Progress --> E[SSE Progress Events]
-    D --> F[Download Complete]
-    F --> G[Archiver: Zip folder to /tmp/torrent_id.zip]
-    G --> H[Return Zip Path to Transfer Route]
-    H --> I[Gdrive Service: Upload Zip]
-    I --> J[Cleanup: Delete Folder & Zip]
+    D --> F{Batching Logic}
+    F -- Batch Complete --> G[UploadFolderToGDrive]
+    G -- Retries with Fresh Streams --> H[Google Drive]
+    H -- Success --> I[Cleanup Batch Folder]
+    I --> J{Next Batch?}
+    J -- Yes --> K[Pause & Wait for User]
+    J -- No --> L[Complete]
 ```
 
 ## Backend Changes
 
 ### Downloader Service (`server/services/downloader.js`)
-- Add `isMagnet(url)` utility.
-- Implement `downloadTorrent(url, onProgress, abortSignal)`:
-    - Creates a unique subfolder in `TMP_DIR`.
-    - Initializes `WebTorrent` client.
-    - Tracks `downloaded`, `total`, `downloadSpeed`, and `numPeers`.
-    - Returns the final ZIP path.
-- Implement `zipDirectory(sourceDir, outPath)` helper using `archiver`.
+- **[UPDATE]** Improve directory detection after download to handle WebTorrent's automatic sanitization of folder names.
+- **[FIX]** Ensure `onBatchComplete` is called with absolute paths that correctly map to the disk structure.
+
+### Google Drive Service (`server/services/gdrive.js`)
+- **[UPDATE]** `withRetry` helper: Enhance to support factory functions for stream recreation.
+- **[FIX]** `uploadToGDrive` and `uploadFolderToGDrive`: Recreate the `ReadStream` and `progress-stream` inside the retry logic to ensure each attempt starts from byte 0.
+- **[UPDATE]** Add more specific error handling for transient vs permanent failures.
 
 ### Transfer Route (`server/routes/transfer.js`)
-- Update the cleanup block to handle directory removal if the source was a torrent.
-- Update progress labels to show peer count for torrents.
+- **[UPDATE]** Improve error reporting for batch uploads to distinguish between quota issues and general failures.
 
 ## Frontend Changes
 
 ### Dashboard View (`client/src/views/dashboard.js`)
-- Update `isYouTubeUrl` logic to also include `isMagnetUrl`.
-- Update UI to show a "Torrent" indicator when a magnet link is detected.
-- **[NEW]** Add a "Start Batch Index" input in the Torrent Options section.
-- Enhance progress display to show "Peers" when downloading a torrent.
-
-### Google Drive Service (`server/services/gdrive.js`)
-- **[UPDATE]** Replace string-based path replacement with `path.relative()` for deterministic relative path calculation.
-- **[NEW]** Implement exponential backoff retry logic for resumable uploads to handle network instability.
+- **[NEW]** Add a "Start Batch Index" input in the Torrent Options section (already implemented, but ensure it's robust).
+- **[UPDATE]** Better error messages for "partial" batch completion.
