@@ -226,8 +226,6 @@ export async function uploadToGDrive(filePath, onProgress = null, abortSignal = 
     }
     if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
     throw err;
-  } finally {
-    if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -372,8 +370,6 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
 
       if (abortSignal?.aborted) throw new Error('Upload was cancelled by user.');
       throw err;
-    } finally {
-      if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
     }
   }
 
