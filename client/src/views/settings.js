@@ -100,8 +100,27 @@ export function renderSettings(username, onNavigate) {
           <div id="cookies-result" style="margin-top:12px; display:none;"></div>
         </div>
 
-        <!-- How to get credentials -->
+        <!-- yt-dlp Engine Card -->
         <div class="card fade-up" style="animation-delay:0.2s;">
+          <div class="card-title">🚀 yt-dlp Engine</div>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:16px;">
+            View the currently installed yt-dlp version and trigger manual updates to the latest nightly build.
+          </p>
+
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px;">
+            <span style="font-weight:500; color:var(--text-secondary); font-size:0.9rem;">Installed Version:</span>
+            <span id="ytdlp-version-badge" class="badge" style="background:var(--bg-elevated);color:var(--text-secondary);">Loading...</span>
+          </div>
+
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <button id="ytdlp-update-btn" class="btn btn-ghost">⚡ Update yt-dlp</button>
+          </div>
+
+          <div id="ytdlp-update-result" style="margin-top:12px; display:none;"></div>
+        </div>
+
+        <!-- How to get credentials -->
+        <div class="card fade-up" style="animation-delay:0.3s;">
           <div class="card-title">📖 How to Get Google Drive Credentials</div>
           <ol style="padding-left: 20px; line-height: 2; color: var(--text-secondary); font-size:0.9rem;">
             <li>Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent-light);">Google Cloud Console</a> and create a project.</li>
@@ -233,6 +252,60 @@ export function renderSettings(username, onNavigate) {
       cookiesResult.style.display = 'flex';
     } finally {
       cookiesRemoveBtn.disabled = false;
+    }
+  });
+
+  // --- yt-dlp Engine section ---
+  const ytdlpVersionBadge = document.getElementById('ytdlp-version-badge');
+  const ytdlpUpdateBtn = document.getElementById('ytdlp-update-btn');
+  const ytdlpUpdateResult = document.getElementById('ytdlp-update-result');
+
+  async function loadYtdlpVersion() {
+    try {
+      const data = await api.getYtdlpVersion();
+      if (data.success) {
+        ytdlpVersionBadge.textContent = data.version;
+        ytdlpVersionBadge.className = 'badge badge-success';
+        ytdlpVersionBadge.style.background = '';
+        ytdlpVersionBadge.style.color = '';
+      } else {
+        ytdlpVersionBadge.textContent = data.version || 'Not Installed / Error';
+        ytdlpVersionBadge.className = 'badge badge-error';
+        ytdlpVersionBadge.style.background = '';
+        ytdlpVersionBadge.style.color = '';
+      }
+    } catch (err) {
+      ytdlpVersionBadge.textContent = 'Error: ' + err.message;
+      ytdlpVersionBadge.className = 'badge badge-error';
+      ytdlpVersionBadge.style.background = '';
+      ytdlpVersionBadge.style.color = '';
+    }
+  }
+
+  loadYtdlpVersion();
+
+  ytdlpUpdateBtn.addEventListener('click', async () => {
+    ytdlpUpdateBtn.disabled = true;
+    ytdlpUpdateBtn.innerHTML = '<span class="spinner"></span> Updating...';
+    ytdlpUpdateResult.style.display = 'none';
+
+    try {
+      const data = await api.updateYtdlp();
+      if (data.success) {
+        ytdlpUpdateResult.className = 'alert alert-success';
+        ytdlpUpdateResult.textContent = '✅ yt-dlp updated successfully.';
+        ytdlpUpdateResult.style.display = 'flex';
+        await loadYtdlpVersion();
+      } else {
+        throw new Error(data.error || 'Failed to update.');
+      }
+    } catch (err) {
+      ytdlpUpdateResult.className = 'alert alert-error';
+      ytdlpUpdateResult.textContent = '❌ ' + err.message;
+      ytdlpUpdateResult.style.display = 'flex';
+    } finally {
+      ytdlpUpdateBtn.disabled = false;
+      ytdlpUpdateBtn.textContent = '⚡ Update yt-dlp';
     }
   });
 }

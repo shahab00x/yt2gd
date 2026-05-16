@@ -6,7 +6,7 @@
  * Runs automatically as an `npm run postinstall` step.
  */
 
-import { existsSync, mkdirSync, chmodSync, createWriteStream } from 'fs';
+import { existsSync, mkdirSync, chmodSync, createWriteStream, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import https from 'https';
@@ -22,7 +22,9 @@ const DOWNLOAD_URL = IS_WIN
   ? 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe'
   : 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp';
 
-if (existsSync(BIN_PATH)) {
+const FORCE = process.argv.includes('--force');
+
+if (existsSync(BIN_PATH) && !FORCE) {
   console.log(`[yt-dlp] Binary already exists at ${BIN_PATH}, skipping download.`);
   process.exit(0);
 }
@@ -66,8 +68,11 @@ try {
   }
   console.log(`[yt-dlp] ✅ Binary saved to ${BIN_PATH}`);
 } catch (err) {
+  try {
+    if (existsSync(BIN_PATH)) unlinkSync(BIN_PATH);
+  } catch (_) {}
   console.error(`[yt-dlp] ❌ Failed to download binary: ${err.message}`);
   console.error('[yt-dlp] You can manually download yt-dlp from https://github.com/yt-dlp/yt-dlp/releases and place it in the /bin directory.');
   // Don't fail the install entirely — the app works without it for direct downloads
-  process.exit(0);
+  process.exit(FORCE ? 1 : 0);
 }

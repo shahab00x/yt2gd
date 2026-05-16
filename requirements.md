@@ -13,3 +13,8 @@
 ## 3. Upload Reliability & Integrity
 - **When** a file upload to Google Drive fails due to network instability or transient errors, the system **shall** retry the upload with a fresh file stream to ensure data integrity.
 - **When** a file upload within a batch fails even after retries, the system **shall** report the specific failure but attempt to continue with other files if possible, or at least maintain a clear status of what was uploaded.
+
+## 4. yt-dlp Update Mechanism
+- **When** the server starts, it **shall** schedule an automatic update check for `yt-dlp` every 24 hours.
+- **When** the user clicks the "Update yt-dlp" button in the settings, the system **shall** force an update of the `yt-dlp` binary.
+- **When** the user views the settings page, the system **shall** display the current version of the installed `yt-dlp` binary.

@@ -9,6 +9,8 @@ import authRoutes from './routes/auth.js';
 import transferRoutes from './routes/transfer.js';
 import systemRoutes from './routes/system.js';
 
+import { exec } from 'child_process';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -57,6 +59,20 @@ app.use((err, req, res, next) => {
 
 // Clear tmp directory on startup
 clearTmp();
+
+// Schedule daily automatic yt-dlp update (every 24 hours)
+const UPDATE_INTERVAL = 24 * 60 * 60 * 1000;
+setInterval(() => {
+  console.log('[AUTO-UPDATE] Starting scheduled daily yt-dlp update check...');
+  const scriptPath = join(__dirname, '../scripts/download-yt-dlp.js');
+  exec(`node "${scriptPath}" --force`, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`[AUTO-UPDATE] ❌ Scheduled daily yt-dlp update failed: ${stderr || error.message}`);
+    } else {
+      console.log('[AUTO-UPDATE] ✅ Scheduled daily yt-dlp update completed successfully.');
+    }
+  });
+}, UPDATE_INTERVAL);
 
 app.listen(PORT, () => {
   console.log(`✅ yt2gd server running on http://localhost:${PORT}`);

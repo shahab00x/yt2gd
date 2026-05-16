@@ -37,6 +37,8 @@ export const api = {
   getTransferList: () => request('GET', '/transfer/list'),
   getSystemStatus: () => request('GET', '/system/status'),
   clearTmp: () => request('POST', '/system/clear-tmp'),
+  getYtdlpVersion: () => request('GET', '/system/ytdlp-version'),
+  updateYtdlp: () => request('POST', '/system/update-ytdlp'),
 
   /**
    * Upload a cookies.txt file (multipart/form-data).

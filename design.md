@@ -67,3 +67,10 @@ sequenceDiagram
 - Update `dashboard.js` to fetch and display active transfers on load.
 - Add "Resume" button for paused transfers.
 - Show overall progress based on the persisted state rather than a single session SSE.
+- Update `settings.js` to display the current `yt-dlp` version and a button to trigger an update.
+
+## 5. yt-dlp Update Mechanism
+- **API Endpoints:**
+  - `GET /api/system/ytdlp-version`: Executes `yt-dlp --version` to return the currently installed version.
+  - `POST /api/system/update-ytdlp`: Executes `node scripts/download-yt-dlp.js --force` to download the latest nightly build.
+- **Background Task:** In `server/index.js`, a `setInterval` runs every 24 hours (86,400,000 ms) to automatically execute the update script.

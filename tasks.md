@@ -1,33 +1,23 @@
-# Tasks: Torrent Batch Upload Fix
+# Tasks: yt-dlp Update Mechanism
 
-## Phase 1: Research & Diagnosis
-- [x] Task 1.1: Analyze `gdrive.js` for stream reuse issues in `withRetry`.
-  - **File Path**: `server/services/gdrive.js`
-  - **Verification Step**: Logic review (Done).
-- [x] Task 1.2: Analyze `downloader.js` for path mapping issues.
-  - **File Path**: `server/services/downloader.js`
-  - **Verification Step**: Logic review (Done).
+## Phase 1: Backend Scripts & API
+- [x] Task 1.1: Modify `scripts/download-yt-dlp.js` to bypass `existsSync` if `--force` argument is provided.
+  - **File Path**: `scripts/download-yt-dlp.js`
+  - **Verification Step**: Run `node scripts/download-yt-dlp.js --force` and verify it downloads a fresh copy even if the binary already exists.
+- [x] Task 1.2: Add `/api/system/ytdlp-version` endpoint to get the current version.
+  - **File Path**: `server/routes/system.js`
+  - **Verification Step**: Send a GET request to the endpoint and verify the version string is returned.
+- [x] Task 1.3: Add `/api/system/update-ytdlp` endpoint to execute the update script with `--force`.
+  - **File Path**: `server/routes/system.js`
+  - **Verification Step**: Send a POST request to the endpoint and verify success.
+- [x] Task 1.4: Add a background interval to run the update script every 24 hours.
+  - **File Path**: `server/index.js`
+  - **Verification Step**: Review the code to ensure `setInterval` is correctly configured.
 
-## Phase 2: Implementation - Google Drive Service
-- [x] Task 2.1: Refactor `withRetry` to support fresh stream recreation.
-  - **File Path**: `server/services/gdrive.js`
-  - **Verification Step**: Code review of the retry loop.
-- [x] Task 2.2: Update `uploadToGDrive` to recreate stream on retry.
-  - **File Path**: `server/services/gdrive.js`
-  - **Verification Step**: Mock a failure and verify the second attempt starts a new stream.
-- [x] Task 2.3: Update `uploadFolderToGDrive` to recreate stream on retry for each file.
-  - **File Path**: `server/services/gdrive.js`
-  - **Verification Step**: Verify loop integrity for multi-file uploads.
-
-## Phase 3: Implementation - Downloader Service
-- [x] Task 3.1: Improve directory detection to handle sanitized folder names.
-  - **File Path**: `server/services/downloader.js`
-  - **Verification Step**: Test with a torrent name containing special characters like `:`.
-
-## Phase 4: Verification
-- [x] Task 4.1: Run a test upload with a simulated network failure.
-  - **File Path**: `scratch/test-verify.js`
-  - **Verification Step**: Verified exports and code structure (Done).
-- [x] Task 4.2: Verify batching logic with a multi-file torrent.
-  - **File Path**: `server/routes/transfer.js`
-  - **Verification Step**: Code review of the path mapping and directory detection (Done).
+## Phase 2: Frontend Implementation
+- [x] Task 2.1: Add `getYtdlpVersion` and `updateYtdlp` methods to the API client.
+  - **File Path**: `client/src/api.js`
+  - **Verification Step**: Ensure functions are properly exported and match the backend endpoints.
+- [x] Task 2.2: Add the version display and update button to the Settings UI.
+  - **File Path**: `client/src/views/settings.js`
+  - **Verification Step**: Load the frontend and verify the button, version text, and click logic works correctly.
