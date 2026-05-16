@@ -74,3 +74,20 @@ sequenceDiagram
   - `GET /api/system/ytdlp-version`: Executes `yt-dlp --version` to return the currently installed version.
   - `POST /api/system/update-ytdlp`: Executes `node scripts/download-yt-dlp.js --force` to download the latest nightly build.
 - **Background Task:** In `server/index.js`, a `setInterval` runs every 24 hours (86,400,000 ms) to automatically execute the update script.
+
+## 6. App Update & Rollback Mechanism
+- **API Endpoints:**
+  - `GET /api/system/commits`: Runs `git log -5 --pretty=format:"%H|%h|%s|%cr|%d"` to retrieve the last 5 commits, including their full and short hashes, message subject, relative date, and git references (to check which is active).
+  - `POST /api/system/update-app`: Runs a command sequence:
+    1. `git reset --hard` (drops local changes for a clean pull)
+    2. `git pull`
+    3. `npm install`
+    4. `npm run build:client`
+    5. Triggers a delayed `process.exit(0)` to let PM2 restart the server.
+  - `POST /api/system/rollback-app`: Receives `{ hash }` and runs:
+    1. `git reset --hard`
+    2. `git checkout <hash>`
+    3. `npm install`
+    4. `npm run build:client`
+    5. Triggers a delayed `process.exit(0)` to let PM2 restart the server.
+- **UI Element**: Add a "System Management" card in the settings view showing the commit history, active commit indicator, update button, and rollback button.

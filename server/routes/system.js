@@ -93,4 +93,102 @@ router.post('/update-ytdlp', (req, res) => {
   });
 });
 
+/**
+ * Helper to run a sequence of commands sequentially.
+ */
+function runCommandChain(commands) {
+  return new Promise((resolve, reject) => {
+    const runNext = (index) => {
+      if (index >= commands.length) return resolve();
+      const cmd = commands[index];
+      console.log(`[SYSTEM] Executing: ${cmd}`);
+      exec(cmd, { cwd: join(__dirname, '../..') }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[SYSTEM] Command failed: ${cmd}\nError: ${stderr || error.message}`);
+          return reject(new Error(stderr || error.message));
+        }
+        runNext(index + 1);
+      });
+    };
+    runNext(0);
+  });
+}
+
+/**
+ * GET /api/system/commits
+ * Returns the last 5 commits, noting which one is currently active.
+ */
+router.get('/commits', (req, res) => {
+  exec('git log -5 --pretty=format:"%H|%h|%s|%cr|%d"', { cwd: join(__dirname, '../..') }, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Failed to get git log: ${stderr || error.message}`);
+      return res.status(500).json({ success: false, error: stderr || error.message });
+    }
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    const commits = lines.map(line => {
+      const [hash, shortHash, subject, date, refs] = line.split('|');
+      const isActive = !!(refs && refs.includes('HEAD'));
+      return { hash, shortHash, subject, date, isActive };
+    });
+    res.json({ success: true, commits });
+  });
+});
+
+/**
+ * POST /api/system/update-app
+ * Pulls the latest commits, installs dependencies, rebuilds client, and restarts via PM2.
+ */
+router.post('/update-app', async (req, res) => {
+  console.log('[SYSTEM] Triggering application self-update...');
+  const commands = [
+    'git reset --hard',
+    'git pull',
+    'npm install',
+    'npm run build:client'
+  ];
+
+  try {
+    await runCommandChain(commands);
+    console.log('[SYSTEM] Self-update successful! Restarting server in 1.5s...');
+    res.json({ success: true, message: 'Application updated successfully. Server is restarting...' });
+    
+    setTimeout(() => {
+      process.exit(0);
+    }, 1500);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/system/rollback-app
+ * Checks out a specific commit hash, installs dependencies, rebuilds client, and restarts.
+ */
+router.post('/rollback-app', async (req, res) => {
+  const { hash } = req.body;
+  if (!hash) {
+    return res.status(400).json({ success: false, error: 'Commit hash is required.' });
+  }
+
+  console.log(`[SYSTEM] Triggering rollback/checkout to commit ${hash}...`);
+  const commands = [
+    'git reset --hard',
+    `git checkout ${hash}`,
+    'npm install',
+    'npm run build:client'
+  ];
+
+  try {
+    await runCommandChain(commands);
+    console.log(`[SYSTEM] Rollback to ${hash} successful! Restarting server in 1.5s...`);
+    res.json({ success: true, message: `Checked out commit ${hash.substring(0, 7)} successfully. Server is restarting...` });
+    
+    setTimeout(() => {
+      process.exit(0);
+    }, 1500);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;

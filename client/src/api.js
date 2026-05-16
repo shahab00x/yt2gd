@@ -39,6 +39,9 @@ export const api = {
   clearTmp: () => request('POST', '/system/clear-tmp'),
   getYtdlpVersion: () => request('GET', '/system/ytdlp-version'),
   updateYtdlp: () => request('POST', '/system/update-ytdlp'),
+  getCommits: () => request('GET', '/system/commits'),
+  updateApp: () => request('POST', '/system/update-app'),
+  rollbackApp: (hash) => request('POST', '/system/rollback-app', { hash }),
 
   /**
    * Upload a cookies.txt file (multipart/form-data).

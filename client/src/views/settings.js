@@ -119,8 +119,27 @@ export function renderSettings(username, onNavigate) {
           <div id="ytdlp-update-result" style="margin-top:12px; display:none;"></div>
         </div>
 
-        <!-- How to get credentials -->
+        <!-- System Management Card -->
         <div class="card fade-up" style="animation-delay:0.3s;">
+          <div class="card-title">⚙️ System Management</div>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:16px;">
+            Manage the application codebase. You can pull the latest updates from GitHub or roll back the codebase to a previous commit.
+          </p>
+
+          <div style="font-weight:600; color:var(--text-primary); font-size:0.95rem; margin-bottom:12px;">Recent Commit History:</div>
+          <div id="commits-list-container" style="margin-bottom:20px; display:flex; flex-direction:column; gap:8px;">
+            <div style="color:var(--text-secondary); text-align:center; padding:12px;">Loading commit history...</div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-start;">
+            <button id="app-update-btn" class="btn btn-primary">
+              ⚡ Pull Latest Update
+            </button>
+          </div>
+        </div>
+
+        <!-- How to get credentials -->
+        <div class="card fade-up" style="animation-delay:0.4s;">
           <div class="card-title">📖 How to Get Google Drive Credentials</div>
           <ol style="padding-left: 20px; line-height: 2; color: var(--text-secondary); font-size:0.9rem;">
             <li>Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent-light);">Google Cloud Console</a> and create a project.</li>
@@ -306,6 +325,131 @@ export function renderSettings(username, onNavigate) {
     } finally {
       ytdlpUpdateBtn.disabled = false;
       ytdlpUpdateBtn.textContent = '⚡ Update yt-dlp';
+    }
+  });
+
+  // --- System Management section ---
+  const commitsListContainer = document.getElementById('commits-list-container');
+  const appUpdateBtn = document.getElementById('app-update-btn');
+
+  function showSystemRestartOverlay(message) {
+    let overlay = document.getElementById('restart-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'restart-overlay';
+      overlay.style.cssText = `
+        position: fixed;
+        inset: 0;
+        background: rgba(13, 13, 18, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        color: var(--text-primary);
+        font-family: var(--font);
+        animation: fadeIn 0.3s ease;
+      `;
+      overlay.innerHTML = `
+        <div style="background: var(--bg-surface); padding: 32px 48px; border-radius: var(--radius-lg); border: 1px solid var(--border); box-shadow: var(--shadow-lg); text-align: center; max-width: 400px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+          <span class="spinner" style="width: 40px; height: 40px; border-width: 3px;"></span>
+          <h3 id="restart-title" style="margin: 0; font-size: 1.2rem; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">System Updating...</h3>
+          <p id="restart-desc" style="margin: 0; font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Rebuilding assets, compiling packages, and restarting yt2gd. Please keep this tab open.</p>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+    }
+    document.getElementById('restart-title').textContent = message;
+  }
+
+  function hideSystemRestartOverlay() {
+    const overlay = document.getElementById('restart-overlay');
+    if (overlay) overlay.remove();
+  }
+
+  function pollServerRestart() {
+    console.log('[SYSTEM] Starting server restart polling...');
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        if (res.ok) {
+          clearInterval(interval);
+          console.log('[SYSTEM] Server is back online! Reloading page...');
+          window.location.reload();
+        }
+      } catch (e) {
+        // Expected network failures while server is rebuilding/restarting
+      }
+    }, 2000);
+  }
+
+  async function loadCommits() {
+    try {
+      const data = await api.getCommits();
+      if (data.success && data.commits) {
+        commitsListContainer.innerHTML = data.commits.map(commit => `
+          <div class="commit-item" style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); transition:all var(--transition);">
+            <div style="display:flex; flex-direction:column; gap:4px; min-width:0; flex:1;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <code style="background:var(--bg-surface); padding:2px 6px; border-radius:4px; font-size:0.75rem; color:var(--accent-light); font-weight:600;">${commit.shortHash}</code>
+                ${commit.isActive ? '<span class="badge badge-success" style="font-size:0.65rem; padding:1px 6px;">Active</span>' : ''}
+                <span style="font-size:0.75rem; color:var(--text-muted);">${commit.date}</span>
+              </div>
+              <div style="font-size:0.85rem; font-weight:500; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${commit.subject}">${commit.subject}</div>
+            </div>
+            ${!commit.isActive ? `
+              <button class="btn btn-ghost rollback-btn" data-hash="${commit.hash}" style="padding:6px 12px; font-size:0.75rem; height:auto; margin-left:12px;">Rollback</button>
+            ` : ''}
+          </div>
+        `).join('');
+
+        // Wire up rollback buttons
+        document.querySelectorAll('.rollback-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            const hash = e.target.getAttribute('data-hash');
+            if (confirm(`Are you sure you want to roll back the codebase to commit ${hash.substring(0, 7)}?`)) {
+              showSystemRestartOverlay('Rolling back system codebase...');
+              try {
+                const res = await api.rollbackApp(hash);
+                if (res.success) {
+                  pollServerRestart();
+                } else {
+                  throw new Error(res.error || 'Failed to roll back.');
+                }
+              } catch (err) {
+                hideSystemRestartOverlay();
+                alert('❌ Rollback failed: ' + err.message);
+              }
+            }
+          });
+        });
+      } else {
+        commitsListContainer.innerHTML = '<div style="color:var(--error); text-align:center; padding:12px;">❌ Could not load commit history.</div>';
+      }
+    } catch (err) {
+      commitsListContainer.innerHTML = `<div style="color:var(--error); text-align:center; padding:12px;">❌ Error loading commit history: ${err.message}</div>`;
+    }
+  }
+
+  loadCommits();
+
+  appUpdateBtn.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to pull the latest changes from GitHub and update the application?')) {
+      showSystemRestartOverlay('Updating Application...');
+      try {
+        const res = await api.updateApp();
+        if (res.success) {
+          pollServerRestart();
+        } else {
+          throw new Error(res.error || 'Failed to update.');
+        }
+      } catch (err) {
+        hideSystemRestartOverlay();
+        alert('❌ Update failed: ' + err.message);
+      }
     }
   });
 }

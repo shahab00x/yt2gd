@@ -18,3 +18,8 @@
 - **When** the server starts, it **shall** schedule an automatic update check for `yt-dlp` every 24 hours.
 - **When** the user clicks the "Update yt-dlp" button in the settings, the system **shall** force an update of the `yt-dlp` binary.
 - **When** the user views the settings page, the system **shall** display the current version of the installed `yt-dlp` binary.
+
+## 5. App Update & Rollback Mechanism
+- **When** the user views the settings page, the system **shall** retrieve and display the last 5 git commits of the codebase.
+- **When** the user triggers an update, the system **shall** pull the latest code, install dependencies, rebuild the frontend, and restart the process via PM2.
+- **When** the user triggers a rollback to a specific commit, the system **shall** check out that commit, install dependencies, rebuild the frontend, and restart the process via PM2.
