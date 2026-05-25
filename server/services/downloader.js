@@ -674,5 +674,43 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
 
   if (!files.length) throw new Error('Download finished but no output file found.');
 
+  // --- FIX: Handle multiple files (playlists) ---
+  if (files.length > 1) {
+    // Multiple files detected (playlist) — organize them in a folder for upload
+    console.log(`📂 Playlist detected: ${files.length} videos downloaded`);
+    
+    const playlistFolderId = `playlist_${Date.now()}`;
+    const playlistDir = join(TMP_DIR, playlistFolderId);
+    
+    if (!existsSync(playlistDir)) mkdirSync(playlistDir, { recursive: true });
+    
+    // Move all files into the playlist folder
+    for (const file of files) {
+      const srcPath = join(TMP_DIR, file);
+      const destPath = join(playlistDir, file);
+      try {
+        // Use rename for efficiency; falls back to copy if across filesystems
+        const fs = await import('fs/promises');
+        await fs.rename(srcPath, destPath);
+      } catch (err) {
+        console.warn(`⚠️ Could not rename ${file}, using copy instead`);
+        const fs = await import('fs/promises');
+        await fs.copyFile(srcPath, destPath);
+        await fs.unlink(srcPath);
+      }
+    }
+    
+    console.log(`✅ Organized playlist files in ${playlistFolderId}`);
+    
+    // Return as a folder for upload (similar to torrent folder mode)
+    return {
+      downloadDir: playlistDir,
+      torrentName: `Playlist_${Date.now()}`,
+      parentDir: playlistDir,
+      isPlaylist: true
+    };
+  }
+
+  // Single file — return as before
   return join(TMP_DIR, files[0]);
 }
