@@ -23,3 +23,12 @@
 - **When** the user views the settings page, the system **shall** retrieve and display the last 5 git commits of the codebase.
 - **When** the user triggers an update, the system **shall** pull the latest code, install dependencies, rebuild the frontend, and restart the process via PM2.
 - **When** the user triggers a rollback to a specific commit, the system **shall** check out that commit, install dependencies, rebuild the frontend, and restart the process via PM2.
+
+## 6. Manual Stranded File Upload
+- **When** the user views the "System Status" section, the system **shall** display a manual "Upload" button next to each file or folder stranded in the temporary directory.
+- **When** the user clicks the "Upload" button for a stranded item, the system **shall** invoke the manual upload endpoint to push that specific file or folder to Google Drive and refresh the System Status list.
+
+## 7. Resilient Playlist Downloading
+- **When** the user triggers a download for a YouTube playlist URL, the system **shall** disable the `noPlaylist` restriction and pass the `ignoreErrors` flag to the downloader to skip unavailable or deleted items.
+- **When** the downloader encounters individual video errors during playlist download, the system **shall** log the errors and continue downloading the remaining accessible playlist items.
+- **When** the playlist download process completes, if at least one file has been successfully downloaded, the system **shall** proceed with organizing and uploading the downloaded playlist items to Google Drive instead of crashing.

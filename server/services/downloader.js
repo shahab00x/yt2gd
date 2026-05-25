@@ -600,12 +600,14 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     formatStr = `bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]`;
   }
 
+  const isPlaylistUrl = clean.includes('list=');
+
   const options = {
     output: outputTemplate,
     format: formatStr,
     newline: true,
     progress: true,
-    noPlaylist: true, // Avoid "NoneType" errors on videos in playlists
+    noPlaylist: !isPlaylistUrl, // Only disable playlists if it is not a playlist URL
     concurrentFragments: 10, // Speed up fragment-based downloads
     userAgent: DEFAULT_UA,
     noJsRuntimes: true,
@@ -616,6 +618,7 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     geoBypass: true,
     // Skip unavailable videos instead of crashing
     skipUnavailableFragments: true,
+    ignoreErrors: true, // Instruct yt-dlp to skip unavailable videos rather than halting
     ...(isLive ? {
       liveFromStart: true,
       noPart: true,
@@ -663,7 +666,12 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     await subprocess;
   } catch (err) {
     if (abortSignal?.aborted) throw new Error('Download was cancelled by user.');
-    throw err;
+    const files = readdirSync(TMP_DIR).filter(f => f.startsWith(`${baseName} - `));
+    if (files.length > 0) {
+      console.warn(`⚠️ yt-dlp exited with an error, but ${files.length} files were downloaded successfully. Continuing. Error:`, err.message);
+    } else {
+      throw err;
+    }
   } finally {
     if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
   }

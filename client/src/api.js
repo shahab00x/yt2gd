@@ -37,6 +37,7 @@ export const api = {
   getTransferList: () => request('GET', '/transfer/list'),
   getSystemStatus: () => request('GET', '/system/status'),
   clearTmp: () => request('POST', '/system/clear-tmp'),
+  uploadFiles: (targetName) => request('POST', '/system/upload-files', { targetName }),
   getYtdlpVersion: () => request('GET', '/system/ytdlp-version'),
   updateYtdlp: () => request('POST', '/system/update-ytdlp'),
   getCommits: () => request('GET', '/system/commits'),

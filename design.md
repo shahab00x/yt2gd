@@ -91,3 +91,19 @@ sequenceDiagram
     4. `npm run build:client`
     5. Triggers a delayed `process.exit(0)` to let PM2 restart the server.
 - **UI Element**: Add a "System Management" card in the settings view showing the commit history, active commit indicator, update button, and rollback button.
+
+## 7. Resilient Playlist Downloading Design
+- **Conditional Playlist Support:** In `downloader.js`, the system detects if the YouTube URL is a playlist by checking for `list=` parameter. If detected:
+  - `noPlaylist` option is set to `false`.
+  - `ignoreErrors` option is set to `true` to instruct `yt-dlp` to skip over unavailable, private, or deleted videos.
+- **Robust Exception Interception:** If `youtube-dl-exec` exits with a non-zero code due to skipped videos, the system intercepts the exception:
+  - Checks if any files starting with the custom session `baseName` exist in `TMP_DIR`.
+  - If files are found, the error is treated as non-fatal, logged to the console, and execution proceeds to folder organization and Google Drive upload.
+  - If no files exist, the error is rethrown to fail gracefully.
+
+## 8. Manual Stranded File Upload Design
+- **API Wrapper (`client/src/api.js`):** Add `uploadFiles` to call `POST /api/system/upload-files` with `{ targetName }`.
+- **System Status UI Integration (`client/src/views/dashboard.js`):**
+  - Rewrite `refreshSystemStatus` to render each file/folder inside `tmpItems` using the premium `.history-item` card style.
+  - Append an "Upload" button next to each stranded file or folder.
+  - Bind dynamic click handlers that disable the button, call `api.uploadFiles`, alert the user upon completion, and refresh the system status view.

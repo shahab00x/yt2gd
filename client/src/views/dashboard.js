@@ -307,11 +307,21 @@ export async function renderDashboard(username, onNavigate) {
 
       let tmpItems = '';
       if (data.tmp.contents.length > 0) {
-        tmpItems = data.tmp.contents.map(f =>
-          `<div class="file-meta" style="padding:2px 0;">  ${f.isDir ? '📁' : '📄'} ${f.name} — ${fmtSize(f.size)}</div>`
-        ).join('');
+        tmpItems = `<div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">` + 
+          data.tmp.contents.map(f => `
+            <div class="history-item" style="padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;">
+              <div class="file-info" style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
+                <span class="file-icon" style="font-size: 1.2rem;">${f.isDir ? '📁' : '📄'}</span>
+                <div style="min-width: 0; flex: 1;">
+                  <div class="file-name" style="font-size:0.85rem; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${f.name}</div>
+                  <div class="file-meta" style="font-size:0.75rem; margin-top:0;">${fmtSize(f.size)}</div>
+                </div>
+              </div>
+              <button class="btn btn-primary manual-upload-btn" data-name="${f.name}" style="padding: 6px 12px; font-size: 0.75rem; white-space: nowrap;">Upload</button>
+            </div>
+          `).join('') + `</div>`;
       } else {
-        tmpItems = '<div class="file-meta" style="padding:2px 0;">  (empty)</div>';
+        tmpItems = '<div class="file-meta" style="padding:8px 0; color:var(--text-muted);">(empty)</div>';
       }
 
       systemContainer.innerHTML = `
@@ -326,6 +336,25 @@ export async function renderDashboard(username, onNavigate) {
           ${tmpItems}
         </div>
       `;
+
+      // Attach click listeners to the dynamic upload buttons
+      systemContainer.querySelectorAll('.manual-upload-btn').forEach(btn => {
+        btn.onclick = async () => {
+          const targetName = btn.dataset.name;
+          btn.disabled = true;
+          btn.textContent = 'Uploading...';
+          try {
+            const res = await api.uploadFiles(targetName);
+            alert(`✅ ${res.message || 'Upload complete!'}`);
+            await refreshSystemStatus();
+          } catch (err) {
+            console.error('Manual upload failed:', err);
+            alert(`❌ Upload failed: ${err.message}`);
+            btn.disabled = false;
+            btn.textContent = 'Upload';
+          }
+        };
+      });
     } catch (err) {
       systemContainer.innerHTML = `<div class="file-meta" style="color:var(--error);">Failed to load system status</div>`;
     }
