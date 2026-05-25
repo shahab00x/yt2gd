@@ -6,6 +6,7 @@ import { execSync, exec } from 'child_process';
 import { requireAuth } from './auth.js';
 import { TMP_DIR, clearTmp } from '../services/downloader.js';
 import { getDiskUsage, getDirSize } from '../services/system_utils.js';
+import { uploadFolderToGDrive } from '../services/gdrive.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,6 +56,63 @@ router.get('/status', (req, res) => {
 router.post('/clear-tmp', (req, res) => {
   clearTmp();
   res.json({ success: true, message: 'Temporary folder cleared.' });
+});
+
+/**
+ * POST /api/system/upload-files
+ * Manually uploads files/folders from tmp to Google Drive.
+ * Body: { targetName: string } - name of folder or file in tmp dir
+ */
+router.post('/upload-files', async (req, res) => {
+  const { targetName } = req.body;
+  
+  if (!targetName || typeof targetName !== 'string') {
+    return res.status(400).json({ error: 'Target name is required.' });
+  }
+
+  const targetPath = join(TMP_DIR, targetName);
+
+  // Security check: ensure target is within TMP_DIR
+  if (!targetPath.startsWith(TMP_DIR)) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+
+  if (!existsSync(targetPath)) {
+    return res.status(404).json({ error: `Target not found: ${targetName}` });
+  }
+
+  try {
+    const stats = statSync(targetPath);
+    const abortSignal = new AbortController().signal;
+
+    let result;
+    if (stats.isDirectory()) {
+      // Upload as folder
+      console.log(`📂 Uploading folder: ${targetName}`);
+      result = await uploadFolderToGDrive(targetPath, targetName, ({ uploaded, total, speed, percent, currentFile }) => {
+        console.log(`[Upload] ${currentFile}: ${Math.round(percent)}%`);
+      }, abortSignal);
+    } else {
+      // Upload as single file
+      const { uploadToGDrive } = await import('../services/gdrive.js');
+      console.log(`📄 Uploading file: ${targetName}`);
+      result = await uploadToGDrive(targetPath, ({ uploaded, total, speed, percent }) => {
+        console.log(`[Upload] ${Math.round(percent)}%`);
+      }, abortSignal);
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully uploaded "${targetName}" to Google Drive.`,
+      fileInfo: result
+    });
+  } catch (err) {
+    console.error(`Failed to upload ${targetName}:`, err.message);
+    res.status(500).json({ 
+      success: false, 
+      error: `Upload failed: ${err.message}` 
+    });
+  }
 });
 
 /**
