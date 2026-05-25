@@ -557,6 +557,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
 
 /**
  * Download a URL using the best method available.
+ * For playlists, skips unavailable videos instead of crashing.
  */
 export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false, onBatchComplete = null, startBatchIndex = 0) {
   ensureTmpDir();
@@ -588,8 +589,6 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   }
 
   // yt-dlp path for YouTube pages
-  // const outputTemplate = join(TMP_DIR, `${baseName}.%(ext)s`);
-  // const outputTemplate = join(TMP_DIR, `${baseName}_%(title)s.%(ext)s`);
   const outputTemplate = join(TMP_DIR, `${baseName} - %(channel)s - %(title)s.%(ext)s`);
 
   let formatStr;
@@ -604,25 +603,25 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const options = {
     output: outputTemplate,
     format: formatStr,
-    // noWarnings: true,
     newline: true,
     progress: true,
     noPlaylist: true, // Avoid "NoneType" errors on videos in playlists
     concurrentFragments: 10, // Speed up fragment-based downloads
     userAgent: DEFAULT_UA,
-    noJsRuntimes: true,     // → --no-js-runtimes (disables deno first)
+    noJsRuntimes: true,
     jsRuntimes: 'node',
-    remoteComponents: 'ejs:github', // Auto-download solver scripts
+    remoteComponents: 'ejs:github',
     socketTimeout: 120,
     noCheckCertificates: true,
     geoBypass: true,
-    // Workaround for ended live streams and preventing sticking on active ones
+    // Skip unavailable videos instead of crashing
+    skipUnavailableFragments: true,
     ...(isLive ? {
       liveFromStart: true,
       noPart: true,
       waitForVideo: 10,
     } : {
-      matchFilters: '!is_live', // Reject active live streams to prevent getting stuck
+      matchFilters: '!is_live',
     }),
   };
 
@@ -669,14 +668,12 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
   }
 
-  // const files = readdirSync(TMP_DIR).filter(f => f.startsWith(baseName));
   const files = readdirSync(TMP_DIR).filter(f => f.startsWith(`${baseName} - `));
 
   if (!files.length) throw new Error('Download finished but no output file found.');
 
   // --- FIX: Handle multiple files (playlists) ---
   if (files.length > 1) {
-    // Multiple files detected (playlist) — organize them in a folder for upload
     console.log(`📂 Playlist detected: ${files.length} videos downloaded`);
     
     const playlistFolderId = `playlist_${Date.now()}`;
@@ -689,7 +686,6 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
       const srcPath = join(TMP_DIR, file);
       const destPath = join(playlistDir, file);
       try {
-        // Use rename for efficiency; falls back to copy if across filesystems
         const fs = await import('fs/promises');
         await fs.rename(srcPath, destPath);
       } catch (err) {
@@ -702,7 +698,6 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     
     console.log(`✅ Organized playlist files in ${playlistFolderId}`);
     
-    // Return as a folder for upload (similar to torrent folder mode)
     return {
       downloadDir: playlistDir,
       torrentName: `Playlist_${Date.now()}`,
@@ -711,6 +706,5 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     };
   }
 
-  // Single file — return as before
   return join(TMP_DIR, files[0]);
 }
