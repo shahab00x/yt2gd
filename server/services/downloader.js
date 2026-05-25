@@ -607,7 +607,8 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     format: formatStr,
     newline: true,
     progress: true,
-    noPlaylist: !isPlaylistUrl, // Only disable playlists if it is not a playlist URL
+    // Only add noPlaylist for non-playlist URLs; omitting the key entirely allows playlists through
+    ...(isPlaylistUrl ? {} : { noPlaylist: true }),
     concurrentFragments: 10, // Speed up fragment-based downloads
     userAgent: DEFAULT_UA,
     noJsRuntimes: true,
