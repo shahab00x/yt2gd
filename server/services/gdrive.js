@@ -257,6 +257,7 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   console.log(`📂 Found ${allFilePaths.length} files to upload`);
   const totalFiles = allFilePaths.length;
   let uploadedFiles = 0;
+  let totalSize = 0;
   const fileSizes = {};
   // Calculate total size
   for (const filePath of allFilePaths) {
