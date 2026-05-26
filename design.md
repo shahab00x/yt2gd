@@ -107,3 +107,24 @@ sequenceDiagram
   - Rewrite `refreshSystemStatus` to render each file/folder inside `tmpItems` using the premium `.history-item` card style.
   - Append an "Upload" button next to each stranded file or folder.
   - Bind dynamic click handlers that disable the button, call `api.uploadFiles`, alert the user upon completion, and refresh the system status view.
+
+## 9. Torrent Batch Upload Path Alignment & Skipping Design
+- **Path Mapping Alignment:** In `downloader.js`, the first path segment of the files in `batch.files` (which represents the original unsanitized torrent name) will be replaced with `foundDirName` (the actual sanitized folder name detected on disk) so that the correct absolute paths are passed to `uploadFolderToGDrive`.
+- **Exist Check and Skip in GDrive Upload:** In `uploadFolderToGDrive` (`server/services/gdrive.js`), before attempting to stat and upload a file from `specificFiles`, the system will perform an `existsSync` check. If the file is missing:
+  - The system will log a warning and skip the file using `continue`.
+  - The system will subtract the file's size from `totalSize` to keep the progress percentage accurate.
+- **Robustness Workflow:**
+```mermaid
+graph TD
+    A[Batch Download Complete] --> B{Subdirectory detected?}
+    B -- Yes --> C[Replace unsanitized prefix with actual subdirectory name in file paths]
+    B -- No --> D[Keep original paths]
+    C --> E[Invoke onBatchComplete with aligned paths]
+    D --> E
+    E --> F[Iterate over files in uploadFolderToGDrive]
+    F --> G{File exists on disk?}
+    G -- Yes --> H[Upload file and update progress]
+    G -- No --> I[Log warning, subtract size from totalSize, and continue]
+    H --> J[Next file / Complete]
+    I --> J
+```

@@ -15,3 +15,12 @@
 - [x] Task 2.2: Add try-catch interception for yt-dlp execution error in `downloader.js` to allow partial downloads to be organized and uploaded if at least one file exists
   - **File Path**: `server/services/downloader.js`
   - **Verification Step**: Run or simulate a playlist download with at least one unavailable item to verify the downloader logs the error, proceeds with the remaining items, and succeeds instead of crashing the transfer.
+
+## Phase 3: Torrent Batch Upload Robustness
+- [x] Task 3.1: Map batch file paths in `downloader.js` to use the actual sanitized subdirectory name on disk when it differs from the original torrent name
+  - **File Path**: `server/services/downloader.js`
+  - **Verification Step**: Verify that `mappedFiles` elements substitute the first path segment (original torrent name) with `foundDirName` when a subdirectory exists.
+- [x] Task 3.2: Implement `existsSync` verification and robust error skipping for batch file uploads in `uploadFolderToGDrive`
+  - **File Path**: `server/services/gdrive.js`
+  - **Verification Step**: Verify that missing files do not cause `uploadFolderToGDrive` to crash, and instead are skipped with their size correctly deducted from `totalSize`.
+

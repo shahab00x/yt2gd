@@ -480,6 +480,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           
           // Extract necessary data before destroying the client
           let uploadSource = downloadDir;
+          let foundDirName = null;
           try {
             const items = readdirSync(downloadDir);
             const foundDir = items.find(i => {
@@ -489,12 +490,22 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
             });
             if (foundDir) {
               uploadSource = join(downloadDir, foundDir);
+              foundDirName = foundDir;
               console.log(`📁 Detected data directory: ${foundDir}`);
             }
           } catch (e) {
             console.warn(`⚠️ Could not list downloadDir for detection: ${e.message}`);
           }
-          const mappedFiles = batch.map(f => normalize(join(downloadDir, f.path)));
+          const mappedFiles = batch.map(f => {
+            if (foundDirName) {
+              const parts = f.path.split(/[/\\]/);
+              if (parts.length > 1) {
+                parts[0] = foundDirName;
+                return normalize(join(downloadDir, ...parts));
+              }
+            }
+            return normalize(join(downloadDir, f.path));
+          });
 
           // **CRITICAL FIX**: Completely destroy the client BEFORE uploading.
           // torrent.pause() is not enough; WebTorrent continues to allocate sparse files 

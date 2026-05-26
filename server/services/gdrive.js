@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { createReadStream, statSync } from 'fs';
+import { createReadStream, statSync, existsSync } from 'fs';
 import { readdir } from 'fs/promises';
 import { basename, join, sep, relative } from 'path';
 import { loadSettings } from './settings.js';
@@ -257,13 +257,13 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   console.log(`📂 Found ${allFilePaths.length} files to upload`);
   const totalFiles = allFilePaths.length;
   let uploadedFiles = 0;
-  let totalSize = 0;
-  
+  const fileSizes = {};
   // Calculate total size
   for (const filePath of allFilePaths) {
     try {
       const stats = statSync(filePath);
       totalSize += stats.size;
+      fileSizes[filePath] = stats.size;
     } catch (_) {}
   }
 
@@ -277,6 +277,14 @@ export async function uploadFolderToGDrive(dirPath, folderName, onProgress = nul
   for (const filePath of allFilePaths) {
     if (abortSignal?.aborted) {
       throw new Error('Upload was cancelled by user.');
+    }
+
+    if (!existsSync(filePath)) {
+      console.warn(`⚠️ File not found on disk, skipping upload: ${filePath}`);
+      if (fileSizes[filePath] !== undefined) {
+        totalSize -= fileSizes[filePath];
+      }
+      continue;
     }
 
     const stats = statSync(filePath);
