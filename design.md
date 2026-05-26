@@ -128,3 +128,9 @@ graph TD
     H --> J[Next file / Complete]
     I --> J
 ```
+
+## 10. Safe WebTorrent Client Destruction Design
+- **Safe Client Destruction Helper:** In `downloader.js`, we will implement a helper function `safeDestroy` within the `downloadTorrent` scope.
+- **Verification and Call:** `safeDestroy` will check if `client` is defined and if `client.destroyed` is false before invoking `client.destroy()`. It will also be wrapped in a try-catch block to suppress any unexpected WebTorrent internal exceptions.
+- **Global Replacement:** All direct calls to `client.destroy()` inside `downloadTorrent` will be replaced with `safeDestroy()`.
+

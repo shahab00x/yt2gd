@@ -23,4 +23,7 @@
 - [x] Task 3.2: Implement `existsSync` verification and robust error skipping for batch file uploads in `uploadFolderToGDrive`
   - **File Path**: `server/services/gdrive.js`
   - **Verification Step**: Verify that missing files do not cause `uploadFolderToGDrive` to crash, and instead are skipped with their size correctly deducted from `totalSize`.
+- [x] Task 3.3: Implement safe WebTorrent client destruction helper to avoid "client already destroyed" exceptions
+  - **File Path**: `server/services/downloader.js`
+  - **Verification Step**: Verify that all `client.destroy()` calls in `downloadTorrent` are replaced by `safeDestroy()`, and the app does not throw when it is invoked multiple times.
 

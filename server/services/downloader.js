@@ -318,6 +318,15 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
 
   return new Promise((resolve, reject) => {
     let client;
+    const safeDestroy = () => {
+      if (client && !client.destroyed) {
+        try {
+          client.destroy();
+        } catch (e) {
+          console.warn('⚠️ Error destroying client:', e.message);
+        }
+      }
+    };
     try {
       client = new WebTorrent();
     } catch (err) {
@@ -331,7 +340,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
         console.warn(`⚠️  WebTorrent peer error (ignored): ${msg}`);
       } else {
         console.error(`❌ WebTorrent error: ${msg}`);
-        client.destroy();
+        safeDestroy();
         reject(err);
       }
     });
@@ -368,7 +377,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           }
 
           if (skipZip) {
-            client.destroy();
+            safeDestroy();
             resolve({ downloadDir: uploadPath, torrentName: torrent.name, parentDir: downloadDir });
             return;
           }
@@ -377,10 +386,10 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           try {
             if (onProgress) onProgress(`Packaging into ZIP...`);
             await zipDirectory(uploadPath, zipPath);
-            client.destroy();
+            safeDestroy();
             resolve({ zipPath, downloadDir, torrentName: torrent.name });
           } catch (err) {
-            client.destroy();
+            safeDestroy();
             reject(err);
           }
         });
@@ -414,7 +423,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
 
           // 3. Process ONLY the requested batch
           if (startBatchIndex >= batches.length) {
-            client.destroy();
+            safeDestroy();
             resolve({ completed: true, torrentName: tName });
             return;
           }
@@ -510,7 +519,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           // **CRITICAL FIX**: Completely destroy the client BEFORE uploading.
           // torrent.pause() is not enough; WebTorrent continues to allocate sparse files 
           // and write pieces in the background, which fills the disk and starves the upload I/O.
-          client.destroy(); 
+          safeDestroy(); 
           console.log(`🛑 WebTorrent client destroyed to free disk I/O and prevent further allocation.`);
 
           if (onBatchComplete) {
@@ -542,7 +551,7 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
           }
 
         } catch (err) {
-          client.destroy();
+          safeDestroy();
           reject(err);
         }
       }
@@ -550,14 +559,14 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
 
     client.on('error', (err) => {
       console.error('❌ WebTorrent error:', err.message);
-      client.destroy();
+      safeDestroy();
       reject(err);
     });
 
     if (abortSignal) {
       const onAbort = () => {
         console.log('🛑 Torrent download aborted.');
-        client.destroy();
+        safeDestroy();
         reject(new Error('Download was cancelled by user.'));
       };
       if (abortSignal.aborted) onAbort();

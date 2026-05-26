@@ -4,6 +4,7 @@
 - **When** a torrent is larger than a configurable threshold or disk space, the system **shall** process the torrent in chunks (batches of files).
 - **When** a batch is completely downloaded, the system **shall** upload it to Google Drive and delete it from the local disk before starting the next batch.
 - **When** a batch download completes, if the torrent directory name on disk has been sanitized, the system **shall** map the file paths in the batch using the actual sanitized directory name on disk to ensure they are located.
+- **When** the WebTorrent client needs to be destroyed (either during success, failure, abort, or cleanup), the system **shall** perform a safe destroy check to ensure that multiple destroy invocations do not throw unhandled "client already destroyed" exceptions.
 - **When** an upload to Google Drive is initiated, if any file in the batch does not exist on disk, the system **shall** skip that file, log a warning, and continue uploading the remaining files without terminating the batch upload.
 - **When** Google Drive quota is exceeded, the system **shall** pause the torrent and notify the user.
 - **When** a torrent is paused, the user **shall** be able to resume it from the UI after clearing space.
