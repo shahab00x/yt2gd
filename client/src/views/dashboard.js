@@ -105,6 +105,9 @@ export async function renderDashboard(username, onNavigate) {
             <button id="transfer-btn" class="btn btn-primary" style="white-space:nowrap;">
               Upload to Drive
             </button>
+            <button id="download-btn" class="btn btn-ghost" style="white-space:nowrap;">
+              Download
+            </button>
           </div>
 
           <!-- YouTube options (hidden until YouTube URL is detected) -->
@@ -442,7 +445,7 @@ export async function renderDashboard(username, onNavigate) {
     }
   });
 
-  transferBtn.addEventListener('click', async () => {
+  async function startTransfer(uploadToDrive = true) {
     const url = fileUrlInput.value.trim();
     if (!url) { fileUrlInput.focus(); return; }
 
@@ -465,8 +468,17 @@ export async function renderDashboard(username, onNavigate) {
     progressFill.style.width = '5%';
     progressStep.textContent = 'Connecting…';
     progressDetail.textContent = '';
+    
+    // Disable both buttons and show spinner on the clicked one
     transferBtn.disabled = true;
-    transferBtn.innerHTML = '<span class="spinner"></span>';
+    const downloadBtn = document.getElementById('download-btn');
+    if (downloadBtn) downloadBtn.disabled = true;
+
+    if (uploadToDrive) {
+      transferBtn.innerHTML = '<span class="spinner"></span>';
+    } else {
+      if (downloadBtn) downloadBtn.innerHTML = '<span class="spinner"></span>';
+    }
     cancelBtn.disabled = false;
     cancelBtn.textContent = 'Stop';
 
@@ -480,7 +492,7 @@ export async function renderDashboard(username, onNavigate) {
         progressStep.textContent = 'Downloading…';
         progressFill.style.width = '10%';
       } else if (data.phase === 'upload') {
-        progressStep.textContent = 'Uploading to Drive…';
+        progressStep.textContent = uploadToDrive ? 'Uploading to Drive…' : 'Packaging / Preparing ZIP…';
         progressFill.style.width = '55%';
       }
     });
@@ -511,18 +523,44 @@ export async function renderDashboard(username, onNavigate) {
 
       const data = JSON.parse(e.data);
       resultBox.className = 'alert alert-success';
-      resultBox.innerHTML = `✅ <span><strong>${data.fileName}</strong> uploaded to <em>${data.folder}</em>${data.webViewLink ? ` &nbsp;<a href="${data.webViewLink}" target="_blank" style="color:var(--success);">View on Drive ↗</a>` : ''}</span>`;
+      
+      if (uploadToDrive) {
+        resultBox.innerHTML = `✅ <span><strong>${data.fileName}</strong> uploaded to <em>${data.folder}</em>${data.webViewLink ? ` &nbsp;<a href="${data.webViewLink}" target="_blank" style="color:var(--success);">View on Drive ↗</a>` : ''}</span>`;
+      } else {
+        resultBox.innerHTML = `✅ <span><strong>${data.fileName}</strong> download initiated successfully!</span>`;
+        // Trigger browser-level direct download
+        if (data.downloadUrl) {
+          const a = document.createElement('a');
+          a.href = data.downloadUrl;
+          a.download = data.fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      }
       resultBox.style.display = 'flex';
 
       const history = loadHistory();
-      history.unshift({ fileName: data.fileName, folder: data.folder, webViewLink: data.webViewLink, time: new Date().toLocaleString(), success: true });
+      history.unshift({ 
+        fileName: data.fileName, 
+        folder: uploadToDrive ? data.folder : 'Browser (Direct)', 
+        webViewLink: uploadToDrive ? data.webViewLink : null, 
+        time: new Date().toLocaleString(), 
+        success: true 
+      });
       saveHistory(history);
       document.getElementById('history-container').innerHTML = renderHistory(history);
+      
       fileUrlInput.value = '';
       ytOptions.style.display = 'none';
       torrentOptions.style.display = 'none';
+      
       transferBtn.disabled = false;
       transferBtn.textContent = 'Upload to Drive';
+      if (downloadBtn) {
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = 'Download';
+      }
       setTimeout(() => { progressSection.style.display = 'none'; }, 2000);
     });
 
@@ -536,16 +574,21 @@ export async function renderDashboard(username, onNavigate) {
       const isCancelled = msg.toLowerCase().includes('cancel');
       
       progressSection.style.display = 'none';
-      resultBox.className = isCancelled ? 'alert alert-error' : 'alert alert-error';
+      resultBox.className = 'alert alert-error';
       resultBox.innerHTML = isCancelled ? `🛑 ${msg}` : `❌ ${msg}`;
       resultBox.style.display = 'flex';
+      
       transferBtn.disabled = false;
       transferBtn.textContent = 'Upload to Drive';
+      if (downloadBtn) {
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = 'Download';
+      }
     });
 
     // Now fire the actual request (non-blocking — progress comes through SSE)
     try {
-      await api.transfer(url, format, quality, isLive, torrentMode, startBatchIndex);
+      await api.transfer(url, format, quality, isLive, torrentMode, startBatchIndex, uploadToDrive);
     } catch (err) {
       if (!transferComplete) {
         activeTransfer = false;
@@ -559,18 +602,29 @@ export async function renderDashboard(username, onNavigate) {
 
         if (!isCancelled) {
           const history = loadHistory();
-          history.unshift({ fileName: url.split('/').pop().split('?')[0] || 'unknown', folder: 'yt2gd', time: new Date().toLocaleString(), success: false });
+          history.unshift({ fileName: url.split('/').pop().split('?')[0] || 'unknown', folder: uploadToDrive ? 'yt2gd' : 'Browser', time: new Date().toLocaleString(), success: false });
           saveHistory(history);
           document.getElementById('history-container').innerHTML = renderHistory(history);
         }
         transferBtn.disabled = false;
         transferBtn.textContent = 'Upload to Drive';
+        if (downloadBtn) {
+          downloadBtn.disabled = false;
+          downloadBtn.textContent = 'Download';
+        }
       }
     }
-  });
+  }
 
-  // Allow Enter key
+  transferBtn.addEventListener('click', () => startTransfer(true));
+  
+  const downloadBtn = document.getElementById('download-btn');
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', () => startTransfer(false));
+  }
+
+  // Allow Enter key to trigger default upload to Drive
   fileUrlInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') transferBtn.click();
+    if (e.key === 'Enter') startTransfer(true);
   });
 }

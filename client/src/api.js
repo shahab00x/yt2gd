@@ -29,7 +29,7 @@ export const api = {
   me: () => request('GET', '/auth/me'),
   getSettings: () => request('GET', '/auth/settings'),
   saveSettings: (data) => request('POST', '/auth/settings', data),
-  transfer: (url, format, quality, isLive, torrentMode, startBatchIndex = 0) => request('POST', '/transfer', { url, format, quality, isLive, torrentMode, startBatchIndex }),
+  transfer: (url, format, quality, isLive, torrentMode, startBatchIndex = 0, uploadToDrive = true) => request('POST', '/transfer', { url, format, quality, isLive, torrentMode, startBatchIndex, uploadToDrive }),
   cancelTransfer: (transferId = null) => request('POST', '/transfer/cancel', transferId ? { transferId } : null),
   getInfo: () => request('GET', '/auth/info'),
   getCookiesStatus: () => request('GET', '/auth/cookies/status'),

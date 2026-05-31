@@ -140,4 +140,20 @@ graph TD
 - **Nodemon Config:** Add a root `nodemon.json` config containing ignores for `data/`, `tmp/`, `bin/`, and `client/` to block any automated restarts on runtime data writes.
 - **Gitignore Maintenance:** Add the new file paths within `data/` to `.gitignore` to keep user credentials out of repository history.
 
+## 12. Direct Browser Download Design
+- **API Extension (`server/routes/transfer.js`):**
+  - Add optional `uploadToDrive` boolean (default `true`) to the `POST /api/transfer` payload.
+  - If `uploadToDrive` is `false`, bypass the Google Drive upload logic.
+  - If the download result is a single file, retain its path. If it is a directory (e.g. playlist or folder-torrent), package it into a `.zip` archive inside `tmp/` using `zipDirectory` and clean up the original directory.
+  - Send the SSE `done` event containing a `downloadUrl` property pointing to `/api/transfer/file/<filename>`.
+- **Secure File Retrieval Endpoint:**
+  - Implement `GET /api/transfer/file/:filename` to serve the file from `tmp/` using Express `res.download`.
+  - Perform directory traversal sanitation (`..` check) on `:filename`.
+  - In the download completion callback, call `fs.promises.unlink` to delete the temporary file from disk immediately.
+- **Frontend Integration (`client/src/views/dashboard.js` & `client/src/api.js`):**
+  - Update `api.transfer` in `client/src/api.js` to accept `uploadToDrive` as an argument.
+  - Add a beautiful secondary button "Download" (e.g. `<button id="download-btn" class="btn btn-secondary">Download</button>`) next to the "Upload to Drive" button in the dashboard card.
+  - Bind a click handler to "Download" that invokes the transfer request with `uploadToDrive: false`.
+  - In the SSE `done` handler, if `downloadUrl` is returned in the payload, dynamically trigger a browser-level direct download by creating a temporary anchor tag, dispatching a click, and cleaning it up.
+
 

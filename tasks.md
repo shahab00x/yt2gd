@@ -44,4 +44,21 @@
   - **File Path**: `.gitignore`
   - **Verification Step**: Inspect `.gitignore` to confirm it ignores `data/settings.json`, `data/cookies.txt`, and `data/cookies_filtered.txt`.
 
+## Phase 5: Direct Browser Download Feature
+- [x] Task 5.1: Export `zipDirectory` helper from `downloader.js`
+  - **File Path**: `server/services/downloader.js`
+  - **Verification Step**: Verify that `zipDirectory` is correctly exported and importable in other server files.
+- [x] Task 5.2: Update the transfer endpoint in `transfer.js` to support local browser download mode
+  - **File Path**: `server/routes/transfer.js`
+  - **Verification Step**: Inspect payload handling for `uploadToDrive: false`, verify that folder/playlist results are correctly zipped, and that the SSE `done` event is fired with `downloadUrl`.
+- [x] Task 5.3: Implement the secure `/api/transfer/file/:filename` serving endpoint with auto-deletion
+  - **File Path**: `server/routes/transfer.js`
+  - **Verification Step**: Run a direct download and check that the file is served from `tmp/` and subsequently deleted from the local disk.
+- [x] Task 5.4: Update `client/src/api.js` to send `uploadToDrive` in `transfer` requests
+  - **File Path**: `client/src/api.js`
+  - **Verification Step**: Inspect file and ensure `uploadToDrive` is properly passed to the `POST /api/transfer` request.
+- [x] Task 5.5: Add the "Download" button next to "Upload to Drive" and wire up dynamic trigger logic in dashboard UI
+  - **File Path**: `client/src/views/dashboard.js`
+  - **Verification Step**: Click "Download" on a link, monitor the progress bar, check that the browser prompts for download, and the file is successfully downloaded.
+
 

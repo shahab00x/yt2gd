@@ -292,7 +292,7 @@ function isMagnet(url) {
 /**
  * Zip a directory into a single file.
  */
-async function zipDirectory(sourceDir, outPath) {
+export async function zipDirectory(sourceDir, outPath) {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(outPath);
     const archive = archiver('zip', { zlib: { level: 9 } });

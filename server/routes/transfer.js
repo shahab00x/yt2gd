@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { unlink, rm } from 'fs/promises';
 import { basename } from 'path';
 import { requireAuth } from './auth.js';
-import { downloadFile } from '../services/downloader.js';
+import { downloadFile, zipDirectory, TMP_DIR } from '../services/downloader.js';
 import { uploadToGDrive, uploadFolderToGDrive, getTodayFolderName } from '../services/gdrive.js';
 import { loadSettings } from '../services/settings.js';
 import { saveTransfer, deleteTransfer, updateTransferStatus, getTransfers } from '../services/store.js';
@@ -93,7 +93,7 @@ router.get('/list', (req, res) => {
  * POST /api/transfer
  */
 router.post('/', async (req, res) => {
-  const { url, format = 'video', quality = 'best', isLive = false, torrentMode, startBatchIndex = 0 } = req.body;
+  const { url, format = 'video', quality = 'best', isLive = false, torrentMode, startBatchIndex = 0, uploadToDrive = true } = req.body;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'A valid URL is required.' });
@@ -204,6 +204,47 @@ router.post('/', async (req, res) => {
       return res.json({ success: true, message: 'Batch paused for user.' });
     }
 
+    if (!uploadToDrive) {
+      let finalFilePath = null;
+      let finalFileName = '';
+
+      if (typeof downloadResult === 'string') {
+        finalFilePath = downloadResult;
+        finalFileName = basename(downloadResult);
+      } else if (downloadResult.zipPath) {
+        finalFilePath = downloadResult.zipPath;
+        finalFileName = basename(downloadResult.zipPath);
+        if (downloadResult.downloadDir) {
+          await rm(downloadResult.downloadDir, { recursive: true, force: true });
+        }
+      } else if (downloadResult.downloadDir) {
+        sendSSE('status', { phase: 'upload', message: 'Packaging files into ZIP…' });
+        const folderName = downloadResult.torrentName || basename(downloadResult.downloadDir);
+        const zipPath = join(TMP_DIR, `${folderName.replace(/[^a-z0-9. _-]/gi, '_')}_${Date.now()}.zip`);
+        await zipDirectory(downloadResult.downloadDir, zipPath);
+        
+        finalFilePath = zipPath;
+        finalFileName = basename(zipPath);
+
+        if (downloadResult.parentDir) {
+          await rm(downloadResult.parentDir, { recursive: true, force: true });
+        } else {
+          await rm(downloadResult.downloadDir, { recursive: true, force: true });
+        }
+      }
+
+      deleteTransfer(transferId);
+      delete req.app.locals.activeTransfers[sessionId];
+
+      const result = {
+        success: true,
+        fileName: finalFileName,
+        downloadUrl: `/api/transfer/file/${encodeURIComponent(finalFileName)}`
+      };
+      sendSSE('done', result);
+      return res.json(result);
+    }
+
     if (typeof downloadResult === 'string') {
       localPath = downloadResult;
     } else if (downloadResult.zipPath) {
@@ -290,6 +331,41 @@ router.post('/', async (req, res) => {
     }
     return res.end();
   }
+});
+
+/**
+ * GET /api/transfer/file/:filename
+ * Securely serves files from TMP_DIR for direct local download, then unlinks them immediately.
+ */
+router.get('/file/:filename', (req, res) => {
+  const { filename } = req.params;
+
+  // Security check: strictly disallow any path traversals
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+
+  const filePath = join(TMP_DIR, filename);
+
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found or already downloaded.' });
+  }
+
+  res.download(filePath, filename, async (err) => {
+    if (err) {
+      console.error('Error during browser file download:', err.message);
+    }
+    
+    // Auto-clean up downloaded file immediately to save local space
+    try {
+      if (existsSync(filePath)) {
+        await unlink(filePath);
+        console.log(`🧹 Cleaned up browser-downloaded file: ${filename}`);
+      }
+    } catch (e) {
+      console.warn(`⚠️ Failed to remove temporary file ${filename}:`, e.message);
+    }
+  });
 });
 
 export default router;

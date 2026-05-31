@@ -41,3 +41,7 @@
 - **When** the user updates settings or cookie paths, the system **shall** save these configurations inside the `data/` directory.
 - **When** the server runs in development mode with a file watcher, the system **shall** ignore changes in `data/`, `tmp/`, and `bin/` directories to prevent premature process terminations and network request interruptions.
 
+## 9. Direct Browser Download
+- **When** a user enters a URL/magnet link and clicks "Download", the system **shall** download the file(s) onto the server, broadcast download progress in real-time via the SSE stream, and then trigger a direct browser-level download of the finished file or zipped folder.
+- **When** a direct browser download of a completed item is requested, the system **shall** securely stream the file from the `tmp/` folder with appropriate attachment headers and automatically delete the file from the server's disk once the download completes or fails.
+
