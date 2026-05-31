@@ -27,3 +27,21 @@
   - **File Path**: `server/services/downloader.js`
   - **Verification Step**: Verify that all `client.destroy()` calls in `downloadTorrent` are replaced by `safeDestroy()`, and the app does not throw when it is invoked multiple times.
 
+## Phase 4: Development File Watcher Resiliency (Cookie & Settings Uploads)
+- [x] Task 4.1: Create `nodemon.json` config to ignore runtime/data directories
+  - **File Path**: `nodemon.json`
+  - **Verification Step**: Verify that `nodemon.json` successfully ignores `data/*`, `tmp/*`, `bin/*`, and `client/*`.
+- [x] Task 4.2: Update `settings.js` to store configurations in the `data/` folder and ensure auto-directory creation
+  - **File Path**: `server/services/settings.js`
+  - **Verification Step**: Verify that `settings.json` is successfully created inside `data/` on startup or save, and settings are correctly loaded from `data/settings.json`.
+- [x] Task 4.3: Update `auth.js` to write uploaded cookies to the `data/` folder
+  - **File Path**: `server/routes/auth.js`
+  - **Verification Step**: Upload a cookies file through the Settings page and verify that it is written to `data/cookies.txt`.
+- [x] Task 4.4: Update `downloader.js` to save filtered cookies inside the `data/` folder
+  - **File Path**: `server/services/downloader.js`
+  - **Verification Step**: Trigger a download that uses cookies and check that `data/cookies_filtered.txt` is created and correctly filtered.
+- [x] Task 4.5: Update `.gitignore` to match the new runtime/data paths
+  - **File Path**: `.gitignore`
+  - **Verification Step**: Inspect `.gitignore` to confirm it ignores `data/settings.json`, `data/cookies.txt`, and `data/cookies_filtered.txt`.
+
+

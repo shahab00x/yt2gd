@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
@@ -11,9 +11,11 @@ import { loadSettings, updateGdriveSettings, updateCookiesPath, updateBatchSize 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Cookies file upload — store directly in project root, gitignored
+// Cookies file upload — store in data/ directory to avoid triggering file watchers
+const cookiesDir = join(__dirname, '../../data');
+if (!existsSync(cookiesDir)) mkdirSync(cookiesDir, { recursive: true });
 const cookiesStorage = multer.diskStorage({
-  destination: join(__dirname, '../../'),
+  destination: cookiesDir,
   filename: (req, file, cb) => cb(null, 'cookies.txt'),
 });
 const uploadCookies = multer({ storage: cookiesStorage });

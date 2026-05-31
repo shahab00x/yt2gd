@@ -1,0 +1,8 @@
+{
+  "ignore": [
+    "data/*",
+    "tmp/*",
+    "bin/*",
+    "client/*"
+  ]
+}

@@ -134,3 +134,10 @@ graph TD
 - **Verification and Call:** `safeDestroy` will check if `client` is defined and if `client.destroyed` is false before invoking `client.destroy()`. It will also be wrapped in a try-catch block to suppress any unexpected WebTorrent internal exceptions.
 - **Global Replacement:** All direct calls to `client.destroy()` inside `downloadTorrent` will be replaced with `safeDestroy()`.
 
+## 11. Development File Watcher Resiliency Design
+- **Path Separation:** Migrate `settings.json`, `cookies.txt`, and `cookies_filtered.txt` out of the project root and into the `data/` subdirectory.
+- **Auto-Directory Creation:** In `settings.js` and `auth.js`, verify that the `data/` directory exists before reading/writing files, creating it dynamically if missing.
+- **Nodemon Config:** Add a root `nodemon.json` config containing ignores for `data/`, `tmp/`, `bin/`, and `client/` to block any automated restarts on runtime data writes.
+- **Gitignore Maintenance:** Add the new file paths within `data/` to `.gitignore` to keep user credentials out of repository history.
+
+

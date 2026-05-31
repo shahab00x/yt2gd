@@ -6,3 +6,4 @@ client/dist/
 .env
 bin/
 cookies.txt
+data/

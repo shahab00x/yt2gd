@@ -70,7 +70,10 @@ export function filterCookies(cookiesPath) {
         domain.includes('youtube-nocookie.com');
     });
 
-    const newPath = cookiesPath.replace('.txt', '_filtered.txt');
+    // Write filtered cookies to data/ directory to avoid triggering file watchers
+    const dataDir = join(__dirname, '../../data');
+    if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+    const newPath = join(dataDir, 'cookies_filtered.txt');
     writeFileSync(newPath, filtered.join('\n'));
     return newPath;
   } catch (err) {

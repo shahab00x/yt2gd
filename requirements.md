@@ -35,3 +35,9 @@
 - **When** the user triggers a download for a YouTube playlist URL, the system **shall** disable the `noPlaylist` restriction and pass the `ignoreErrors` flag to the downloader to skip unavailable or deleted items.
 - **When** the downloader encounters individual video errors during playlist download, the system **shall** log the errors and continue downloading the remaining accessible playlist items.
 - **When** the playlist download process completes, if at least one file has been successfully downloaded, the system **shall** proceed with organizing and uploading the downloaded playlist items to Google Drive instead of crashing.
+
+## 8. Development File Watcher Resiliency (Cookie & Settings Uploads)
+- **When** the user uploads a `cookies.txt` file, the system **shall** store it inside the `data/` directory to prevent file watchers from triggering process restarts.
+- **When** the user updates settings or cookie paths, the system **shall** save these configurations inside the `data/` directory.
+- **When** the server runs in development mode with a file watcher, the system **shall** ignore changes in `data/`, `tmp/`, and `bin/` directories to prevent premature process terminations and network request interruptions.
+
