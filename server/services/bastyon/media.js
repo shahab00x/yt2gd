@@ -74,7 +74,12 @@ export async function probePeertubeHosts(hosts, concurrency = PROBE_CONCURRENCY)
       const host = hosts[index++];
       try {
         const resp = await axios.get(`${host}/api/v1/oauth-clients/local`, { timeout: 5000 });
-        results.push({ host, alive: resp.status === 200 });
+        // axios follows redirects by default; a dead host can 301 to an unrelated site
+        // and come back 200, falsely looking alive. Require the final response to come
+        // from the same host (allows same-host http<->https redirects only).
+        const probeUrl = new URL(`${host}/api/v1/oauth-clients/local`);
+        const finalUrl = new URL(resp.request.res?.responseUrl || probeUrl.href);
+        results.push({ host, alive: resp.status === 200 && finalUrl.host === probeUrl.host });
       } catch {
         results.push({ host, alive: false });
       }
@@ -465,7 +470,11 @@ export async function uploadVideo(filePath, account, peertubeHost = null, onProg
     hosts = [peertubeHost];
   } else {
     const dynamic = await fetchPeertubeInstances();
-    hosts = dynamic.length ? await probePeertubeHosts(dynamic) : PEERTUBE_HOSTS;
+    const probed = dynamic.length ? await probePeertubeHosts(dynamic) : [];
+    // Static verified hosts (incl. peertube331) always remain as a guaranteed
+    // fallback tail — the dynamic list excludes them (flagged upload:false) but
+    // they accept uploads in practice.
+    hosts = [...probed, ...PEERTUBE_HOSTS].filter((h, i, arr) => arr.indexOf(h) === i);
   }
   const failures = [];
   for (const host of hosts) {
