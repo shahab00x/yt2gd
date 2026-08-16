@@ -124,7 +124,9 @@ export async function getPeertubeToken(account, host, timeout = 10) {
   // 2. Authenticate
   let authData;
   try {
-    const authResp = await axios.post(`${host}/api/v1/users/blockChainAuth`, data, { timeout: timeout * 1000 });
+    // Form-encoded, matching the Python reference's `requests.post(..., data=data)`. PeerTube's
+    // blockchain-auth endpoint on the pocketnet fork rejects non-form bodies for valid tokens.
+    const authResp = await axios.post(`${host}/api/v1/users/blockChainAuth`, new URLSearchParams(data), { timeout: timeout * 1000 });
     if (authResp.status !== 200) throw new MediaUploadError(`PeerTube blockchain auth failed: ${authResp.statusText}`);
     authData = authResp.data;
   } catch (e) {
@@ -145,7 +147,10 @@ export async function getPeertubeToken(account, host, timeout = 10) {
     throw new MediaUploadError('PeerTube authentication response was missing token fields');
   }
   try {
-    const tokenResp = await axios.post(`${host}/api/v1/users/token`, tokenData, { timeout: timeout * 1000 });
+    // CRITICAL: PeerTube's OAuth token endpoint ONLY accepts application/x-www-form-urlencoded.
+    // axios serializes plain objects as JSON, which the server rejects with 400
+    // "content must be application/x-www-form-urlencoded" once the bypass token is valid.
+    const tokenResp = await axios.post(`${host}/api/v1/users/token`, new URLSearchParams(tokenData), { timeout: timeout * 1000 });
     if (tokenResp.status !== 200) throw new MediaUploadError(`PeerTube token request failed: ${tokenResp.statusText}`);
     const accessToken = tokenResp.data.access_token;
     if (!accessToken) throw new MediaUploadError('PeerTube token response was missing access_token');
@@ -287,11 +292,12 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
 
     while (currentOffset < fileSize) {
       const endByte = Math.min(currentOffset + chunkSize, fileSize) - 1;
+      // The pocketnet.gui reference sends application/octet-stream on chunk PUTs.
       const chunkHeaders = {
         ...headers,
         'Content-Length': String(endByte - currentOffset + 1),
         'Content-Range': `bytes ${currentOffset}-${endByte}/${fileSize}`,
-        'Content-Type': mimeType,
+        'Content-Type': 'application/octet-stream',
       };
 
       const maxAttempts = 5;
@@ -303,6 +309,10 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
             timeout: 120_000,
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
+            // PeerTube signals "continue" with HTTP 308, which axios would otherwise treat as an
+            // error (its default validateStatus only accepts 2xx). Python's requests passes 3xx
+            // through, so match that behavior.
+            validateStatus: (s) => s >= 200 && s < 400,
           });
           if ([200, 308].includes(putResp.status)) {
             if (putResp.status === 200) {
@@ -390,9 +400,11 @@ export async function uploadVideo(filePath, account, peertubeHost = null, onProg
     try {
       return await uploadToPeertube(filePath, account, normalizedHost, onProgress);
     } catch (e) {
-      const failure = `${normalizedHost}: ${e.message}`;
+      // uploadToPeertube already prefixes some errors with the host — avoid doubling it.
+      const msg = e.message || String(e);
+      const failure = msg.startsWith(normalizedHost) ? msg : `${normalizedHost}: ${msg}`;
       failures.push(failure);
-      console.warn(`[Bastyon] PeerTube upload failed on ${normalizedHost}: ${e.message}`);
+      console.warn(`[Bastyon] PeerTube upload failed on ${normalizedHost}: ${msg}`);
     }
   }
   throw new MediaUploadError('All PeerTube hosts failed: ' + failures.join('; '));
