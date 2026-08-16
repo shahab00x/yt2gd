@@ -97,6 +97,7 @@ Downloaded videos and thumbnails live here (NOT `tmp/`, so Dashboard's "Clear Tm
 | :--- | :--- | :--- |
 | `constants.py` | `bastyon/constants.js` | Mainnet (prefix 55, WIF 33, nodes `1..6.pocketnet.app:8899`) / Testnet (prefix 65, WIF 30); `DUST_THRESHOLD=700`, `DEFAULT_FEE=1000`, `MAX_PAYLOAD_SIZE=60000` |
 | `crypto.py` | `bastyon/crypto.js` | Base58 encode/decode, Base58Check, `parse_wif`, `derive_pubkey` (compressed), `pubkey_to_address`, `hash256`, `hash160`, DER sign (`sign_digest`), **plus** `sign_recoverable_compact` for PeerTube auth |
+| `scripts/hex_to_wif.py` | `bastyon/crypto.js` → `hexToWif()` | 64-char hex → mainnet compressed WIF (append `0x01`, Base58Check with WIF prefix 0x21). Accepts hex keys in the account form, converting server-side |
 | `payload.py` | `bastyon/payload.js` | `PostPayload`, `compute_content_hash` (`url+caption+message+tags+images`), `serialize_payload` (`m/l/c/t/i/u/s`), 60 KB limit |
 | `transaction.py` | `bastyon/transaction.js` | varint, pushdata, `build_op_return_script`, `build_p2pkh_script`, `select_utxos`, v2 tx with `ntime`, legacy sighash, `compute_txid`, `build_and_sign_post_transaction` |
 | `rpc.py` | `bastyon/rpc.js` | `POST {node}/rpc/{method}` with `{method, parameters}`; `txunspent`, `sendrawtransactionwithmessage`; node fallback + error taxonomy (mempool, not-registered, limit-exceeded, deserialization) |
@@ -155,7 +156,7 @@ All routes require auth (same `requireAuth` middleware). Progress streams use a 
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
 | GET | `/api/bastyon/accounts` | List accounts → `[{ id, name, createdAt, encrypted: true }]` (never WIF) |
-| POST | `/api/bastyon/accounts` | `{ name, wif }` (vault must be unlocked) → validate WIF, derive address, encrypt, store; errors: invalid WIF / duplicate name / vault locked |
+| POST | `/api/bastyon/accounts` | `{ name, wif }` (vault must be unlocked); `wif` may be a WIF string or 64-char hex (hex is converted via `hexToWif`) → validate key, derive address, encrypt, store; errors: invalid key / duplicate name / vault locked |
 | DELETE | `/api/bastyon/accounts/:id` | Remove account (no decryption needed) |
 | GET | `/api/bastyon/vault/status` | `{ hasAccounts, unlocked }` |
 | POST | `/api/bastyon/vault/unlock` | `{ passphrase }` → derive key, hold in memory; wrong passphrase → 401 (GCM auth-tag failure) |
@@ -197,9 +198,9 @@ sequenceDiagram
     else wrong
         S-->>UI: 401 {error: "Wrong passphrase"}
     end
-    U->>UI: Enter name + WIF private key
+    U->>UI: Enter name + private key (WIF or 64-char hex)
     UI->>S: POST /api/bastyon/accounts {name, wif}
-    S->>A: parse_wif(wif) → address (throws on bad checksum/prefix/length)
+    S->>A: hexToWif(wif) if hex, then parse_wif → address (throws on bad key)
     S->>V: encryptWif(wif) → AES-256-GCM ciphertext
     alt valid & unlocked
         A-->>S: saved {id, name, encryptedWif}
@@ -276,7 +277,7 @@ Follows the existing view structure (sidebar + cards, `fade-up` animations, `.fo
 2. **Draft Editor Card** (visible when a draft is selected) — title, description (textarea), tags (comma-separated), account selector (editable), **Trim Start / Trim End inputs** (optional, `SS`/`MM:SS`/`HH:MM:SS`), "Save Changes" / "Publish to Bastyon" / "Delete Draft" buttons; publish progress area; success alert showing the TxID; error alert with retry.
 3. **Drafts List Card** — persisted drafts with status badges (Draft / Publishing… / Published ✓ / Failed), editable via click; "New Post" button to clear the editor.
 4. **Storage Card** — mirrors the Dashboard's System Status widget: color-coded disk usage bar (used/total/percent) plus the Bastyon staging directory size and a **Clear Staging** button (confirmation-gated).
-5. **Accounts Card** — add-account form (name + password-type WIF input, "Add Account") and the list of stored accounts with a delete button; the WIF is never rendered. Includes the **vault controls**: a "Set Master Passphrase" form on first use (with an unrecoverable-keys warning), an "Unlock" prompt when locked (shown automatically when a publish/account-add is attempted), an "Unlock/Lock" status chip (🔒 Locked / 🔓 Unlocked), and a "Change Passphrase" action (requires unlock; re-encrypts all keys).
+5. **Accounts Card** — add-account form (name + password-type private-key input accepting WIF or 64-char hex, "Add Account") and the list of stored accounts with a delete button; the key is never rendered. Includes the **vault controls**: a "Set Master Passphrase" form on first use (with an unrecoverable-keys warning), an "Unlock" prompt when locked (shown automatically when a publish/account-add is attempted), an "Unlock/Lock" status chip (🔒 Locked / 🔓 Unlocked), and a "Change Passphrase" action (requires unlock; re-encrypts all keys).
 
 Sidebar additions also include an **Audio Track** dropdown on the Dashboard's YouTube options row (next to Format/Quality) so the auto-dub fix applies to every Dashboard download, not just Bastyon posts.
 

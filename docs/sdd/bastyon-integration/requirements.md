@@ -16,10 +16,13 @@ When the user clicks the **Bastyon Uploader** navigation item, the application *
 ## 2. Bastyon Accounts
 
 ### REQ-ACC-1 — Account Creation
-When the user enters a unique account name and a valid WIF private key and submits the form, the system **shall** validate the WIF key (Base58Check checksum, Pocketcoin network prefix, payload length), derive the account address, and store the account on the server with the WIF **encrypted at rest** (REQ-ACC-7). Creating an account **shall** require the vault to be unlocked (REQ-ACC-9).
+When the user enters a unique account name and a valid private key and submits the form, the system **shall** accept the key in either of two formats — a WIF string or a 64-character hex key — validate it, derive the account address, and store the account on the server with the key **encrypted at rest** (REQ-ACC-7). Creating an account **shall** require the vault to be unlocked (REQ-ACC-9).
+
+### REQ-ACC-1a — Hex Key Conversion
+When the user submits a 64-character hex private key, the system **shall** convert it to a mainnet compressed WIF server-side (appending the `0x01` compressed flag and Base58Check-encoding with the Pocketcoin WIF prefix, per `bastyon-poster-linux/scripts/hex_to_wif.py`) before validation and storage; the user **shall** be able to paste either format interchangeably, and the conversion **shall** be invisible in the UI (only the account name is ever shown).
 
 ### REQ-ACC-2 — Account Validation Failure
-When the user submits an invalid WIF private key or a duplicate account name, the system **shall** reject the submission and display the validation error without saving anything.
+When the user submits an invalid private key (bad WIF checksum/prefix/length, or malformed hex) or a duplicate account name, the system **shall** reject the submission and display the validation error without saving anything.
 
 ### REQ-ACC-3 — Account Selection Dropdown
 When the user views the Bastyon Uploader tab, the system **shall** show a dropdown populated with the names of all stored accounts; the user **shall** be able to select exactly one account for a download/publish operation.

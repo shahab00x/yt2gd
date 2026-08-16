@@ -14,7 +14,9 @@ import { MAINNET, TESTNET } from './constants.js';
 import {
   base58checkEncode, base58checkDecode, parseWif, derivePubkey, pubkeyToAddress,
   Account, signDigest, hash256, hash160, InvalidKeyError, base58Encode, base58Decode,
+  hexToWif,
 } from './crypto.js';
+import { normalizePrivateKey } from './accounts.js';
 import { buildPayload, computeContentHash, serializePayload, PayloadTooLargeError } from './payload.js';
 import {
   selectUtxos, buildOpReturnScript, buildP2pkhScript, buildAndSignPostTransaction,
@@ -65,6 +67,36 @@ test('parse wif invalid checksum', () => {
   const mainnetWif = base58checkEncode(Buffer.concat([Buffer.alloc(32, 0x01), Buffer.from([0x01])]), MAINNET.wifPrefix);
   const badWif = mainnetWif.slice(0, -1) + (mainnetWif.endsWith('A') ? 'B' : 'A');
   assert.throws(() => parseWif(badWif), InvalidKeyError);
+});
+
+test('hex to wif matches python hex_to_wif.py vectors', () => {
+  // Reference values computed with an independent Python implementation of
+  // hex_to_wif.py (no coincurve needed): priv||0x01, Base58Check prefix 0x21.
+  assert.equal(hexToWif('42'.repeat(32)), '5vMcBTmp98Dxjp1JTDRTMBwDCyrn7p69vN5oiXpPGkW3oxNAkNb7');
+  assert.equal(hexToWif('AB'.repeat(32)), '5ytWmb3F3558r2N66JeHyG6J1sBDw3Vgvqh9tV254bTaTBSEToNj');
+});
+
+test('hex to wif roundtrips through parseWif', () => {
+  const hex = 'ab12'.repeat(16);
+  const wif = hexToWif(hex);
+  const { privateKeyBytes, network, compressed } = parseWif(wif);
+  assert.equal(privateKeyBytes.toString('hex'), hex.toLowerCase());
+  assert.equal(network, MAINNET);
+  assert.equal(compressed, true);
+});
+
+test('hex to wif rejects malformed input', () => {
+  assert.throws(() => hexToWif('42'.repeat(31)), /64 hex/);
+  assert.throws(() => hexToWif('42'.repeat(32) + 'zz'), /64 hex/);
+  assert.throws(() => hexToWif(''), /64 hex/);
+  assert.throws(() => hexToWif('gggg'.repeat(16)), /64 hex/);
+});
+
+test('normalizePrivateKey converts hex and passes wif through', () => {
+  const hex = '42'.repeat(32);
+  assert.equal(normalizePrivateKey(hex), '5vMcBTmp98Dxjp1JTDRTMBwDCyrn7p69vN5oiXpPGkW3oxNAkNb7');
+  const wif = hexToWif('AB'.repeat(32));
+  assert.equal(normalizePrivateKey(wif), wif);
 });
 
 test('pubkey and address derivation', () => {

@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Account, InvalidKeyError } from './crypto.js';
+import { Account, InvalidKeyError, hexToWif } from './crypto.js';
 import * as vault from './vault.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,22 +62,38 @@ export function decryptAccountWif(account) {
 }
 
 /**
- * Create an account: validate the WIF, derive the address, encrypt, persist.
- * Requires an unlocked vault.
+ * Accept a private key as either a WIF string or a 64-character hex key
+ * (converted to WIF server-side, ported from hex_to_wif.py). Returns WIF.
+ */
+export function normalizePrivateKey(input) {
+  const clean = String(input || '').trim();
+  if (/^[0-9a-fA-F]{64}$/.test(clean)) {
+    return hexToWif(clean); // throws CryptoError on malformed hex
+  }
+  if (/^[0-9a-fA-F]+$/.test(clean)) {
+    throw new AccountStoreError(`Hex private key must be exactly 64 hex characters (got ${clean.length}).`);
+  }
+  return clean; // assume WIF; Account.fromWif validates checksum/prefix/length
+}
+
+/**
+ * Create an account: validate the key (WIF or hex), derive the address,
+ * encrypt, persist. Requires an unlocked vault.
  */
 export function createAccount({ name, wif }) {
   const cleanName = String(name || '').trim();
   if (!cleanName) throw new AccountStoreError('Account name is required.');
-  if (!wif) throw new AccountStoreError('WIF private key is required.');
+  if (!wif) throw new AccountStoreError('Private key is required (WIF or 64-char hex).');
 
   const store = loadStore();
   if (store.accounts.some((a) => a.name.toLowerCase() === cleanName.toLowerCase())) {
     throw new DuplicateAccountError(`An account named "${cleanName}" already exists.`);
   }
 
+  const wifKey = normalizePrivateKey(wif);
   // Validates checksum/prefix/length; throws InvalidKeyError
-  const account = Account.fromWif(wif);
-  const encryptedWif = vault.encryptWif(wif); // throws VaultLockedError when locked
+  const account = Account.fromWif(wifKey);
+  const encryptedWif = vault.encryptWif(wifKey); // throws VaultLockedError when locked
 
   const record = {
     id: `acc_${Date.now()}_${randomUUID().slice(0, 8)}`,

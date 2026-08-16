@@ -15,7 +15,11 @@ import { renderBastyon } from './views/bastyon.js';
 
 let currentUser = null;
 
+// Don't let the browser restore the previous view's scroll offset on reload
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
 function navigate(view) {
+  window.scrollTo({ top: 0, behavior: 'instant' });
   if (view === 'logout') {
     currentUser = null;
     renderLogin((username) => {

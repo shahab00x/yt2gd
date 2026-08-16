@@ -96,11 +96,14 @@ export function renderBastyon(username, onNavigate) {
         <!-- Download & Create Post -->
         <div class="card fade-up">
           <div class="card-title">🎬 Download &amp; Create Post</div>
-          <div class="url-input-wrap">
-            <select id="bastyon-account" class="form-control" style="min-width:150px; flex:0 0 auto;">${accountOptions()}</select>
-            <input id="bastyon-url" class="form-control" type="url"
+          <div class="form-group" style="margin:0 0 16px;">
+            <label for="bastyon-account" style="font-size:0.82rem;">Publishing Account</label>
+            <select id="bastyon-account" class="form-control" style="width:auto; min-width:240px; max-width:100%;">${accountOptions()}</select>
+          </div>
+          <div class="url-input-wrap" style="flex-wrap:wrap;">
+            <input id="bastyon-url" class="form-control" type="url" style="min-width:190px;"
               placeholder="Paste any video URL supported by yt-dlp…" />
-            <button id="bastyon-download-btn" class="btn btn-primary" style="white-space:nowrap;">
+            <button id="bastyon-download-btn" class="btn btn-primary" style="white-space:nowrap; padding:14px 16px;">
               Download &amp; Create Post
             </button>
           </div>
@@ -149,6 +152,17 @@ export function renderBastyon(username, onNavigate) {
             </div>
           </div>
           <div id="bastyon-download-result" style="margin-top:16px; display:none;"></div>
+        </div>
+
+        <!-- Accounts -->
+        <div class="card fade-up" style="animation-delay:0.05s;">
+          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>🔑 Bastyon Accounts</span>
+            <div id="vault-actions"></div>
+          </div>
+          <div id="vault-panel"></div>
+          <div class="divider"></div>
+          <div id="accounts-container"></div>
         </div>
 
         <!-- Draft Editor -->
@@ -222,17 +236,6 @@ export function renderBastyon(username, onNavigate) {
           </div>
           <div id="bastyon-storage-container"><div class="file-meta">Loading…</div></div>
         </div>
-
-        <!-- Accounts -->
-        <div class="card fade-up" style="animation-delay:0.15s;">
-          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>🔑 Bastyon Accounts</span>
-            <div id="vault-actions"></div>
-          </div>
-          <div id="vault-panel"></div>
-          <div class="divider"></div>
-          <div id="accounts-container"></div>
-        </div>
       </main>
     </div>
   `;
@@ -294,6 +297,8 @@ export function renderBastyon(username, onNavigate) {
 
   // ---------------- Vault panel ----------------
   function renderVault() {
+    // Vault state drives whether accounts can be managed — always re-render with it.
+    renderAccounts();
     const panel = document.getElementById('vault-panel');
     const actions = document.getElementById('vault-actions');
 
@@ -320,7 +325,8 @@ export function renderBastyon(username, onNavigate) {
     if (!state.unlocked) {
       panel.innerHTML = `
         <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:12px;">
-          The vault is <strong>locked</strong>. Enter the master passphrase to add accounts and publish.
+          The vault is <strong>locked</strong>. Enter the master passphrase to <strong>add accounts</strong> and publish.
+          The Add Account form appears below once unlocked.
         </p>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <input id="vault-unlock-input" class="form-control" type="password" placeholder="Master passphrase" style="max-width:280px;" />
@@ -351,7 +357,6 @@ export function renderBastyon(username, onNavigate) {
       await api.bastyon.lockVault();
       state.unlocked = false;
       renderVault();
-      renderAccounts();
     });
   }
 
@@ -409,9 +414,10 @@ export function renderBastyon(username, onNavigate) {
     container.innerHTML = `
       <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
         <input id="acc-name" class="form-control" type="text" placeholder="Account name" style="max-width:220px;" />
-        <input id="acc-wif" class="form-control" type="password" placeholder="WIF private key (hidden)" style="flex:1; min-width:260px;" />
+        <input id="acc-wif" class="form-control" type="password" placeholder="Private key — WIF or 64-char hex (hidden)" style="flex:1; min-width:260px;" />
         <button id="acc-add-btn" class="btn btn-primary">Add Account</button>
       </div>
+      <p class="hint" style="margin-bottom:12px;">💡 Hex keys are converted to WIF automatically — paste either format.</p>
       <div id="acc-msg" style="margin-bottom:10px;"></div>
       <div class="history-list">
         ${state.accounts.length === 0
@@ -433,7 +439,7 @@ export function renderBastyon(username, onNavigate) {
       const name = document.getElementById('acc-name').value.trim();
       const wif = document.getElementById('acc-wif').value.trim();
       const msg = document.getElementById('acc-msg');
-      if (!name || !wif) return alert('Enter both a name and a WIF private key.');
+      if (!name || !wif) return alert('Enter both a name and a private key (WIF or 64-char hex).');
       try {
         await api.bastyon.addAccount(name, wif);
         msg.className = 'alert alert-success';
@@ -500,6 +506,7 @@ export function renderBastyon(username, onNavigate) {
     document.getElementById('publish-result').style.display = 'none';
     document.getElementById('publish-progress-section').style.display = 'none';
     renderDraftsList();
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function currentDraft() {

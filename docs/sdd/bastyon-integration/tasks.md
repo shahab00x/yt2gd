@@ -34,9 +34,9 @@
 
 ## Phase 2: Account & draft stores
 
-- [x] Task 2.1: Create `server/services/bastyon/accounts.js` — CRUD on `data/bastyon-accounts.json`; validate WIF on create; store `encryptedWif`; never expose WIF
+- [x] Task 2.1: Create `server/services/bastyon/accounts.js` — CRUD on `data/bastyon-accounts.json`; validate private key on create (WIF or 64-char hex, hex converted via `hexToWif`); store `encryptedWif`; never expose the key
   - **File Path**: `server/services/bastyon/accounts.js`
-  - **Verification Step**: Create account, list shows `{id, name, encrypted: true}` only; API JSON contains no plaintext `wif`; invalid WIF and duplicate name rejected.
+  - **Verification Step**: Create account with a WIF and with a hex key (both succeed, same address as Python `hex_to_wif.py`); list shows `{id, name}` only; API JSON contains no plaintext key; invalid WIF/hex and duplicate name rejected.
 
 - [x] Task 2.2: Create `server/services/bastyon/drafts.js` — CRUD on `data/bastyon-drafts.json`; staging dir `data/bastyon-staging/<draftId>/`
   - **File Path**: `server/services/bastyon/drafts.js`

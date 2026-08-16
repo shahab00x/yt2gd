@@ -97,6 +97,20 @@ export function base58checkDecode(s) {
 }
 
 /**
+ * Convert a 64-character hex private key to a mainnet Bastyon WIF string.
+ * Ported from bastyon-poster-linux/scripts/hex_to_wif.py (compressed key).
+ */
+export function hexToWif(hexStr) {
+  const clean = String(hexStr || '').trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+    throw new CryptoError('Hex private key must be exactly 64 hex characters.');
+  }
+  const privBytes = Buffer.from(clean, 'hex');
+  // 0x01 marks a compressed public key — Bastyon's standard.
+  return base58checkEncode(Buffer.concat([privBytes, Buffer.from([0x01])]), MAINNET.wifPrefix);
+}
+
+/**
  * Parse a WIF private key string.
  * Returns { privateKeyBytes, network, compressed }.
  */
