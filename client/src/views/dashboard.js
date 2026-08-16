@@ -74,6 +74,9 @@ export async function renderDashboard(username, onNavigate) {
           <button class="nav-item active" id="nav-dashboard">
             <span class="nav-icon">🏠</span> Dashboard
           </button>
+          <button class="nav-item" id="nav-bastyon">
+            <span class="nav-icon">📤</span> Bastyon Uploader
+          </button>
           <button class="nav-item" id="nav-settings">
             <span class="nav-icon">⚙️</span> Settings
           </button>
@@ -129,6 +132,24 @@ export async function renderDashboard(username, onNavigate) {
                   <option value="480">480p</option>
                   <option value="360">360p</option>
                   <option value="worst">Lowest</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; flex:1; min-width:140px;">
+                <label for="yt-audio-language" style="font-size:0.82rem;">Audio Track</label>
+                <select id="yt-audio-language" class="form-control" style="padding:8px 10px;">
+                  <option value="original">Original (default)</option>
+                  <option value="en">English</option>
+                  <option value="fa">Farsi</option>
+                  <option value="ar">Arabic</option>
+                  <option value="tr">Turkish</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="es">Spanish</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="ru">Russian</option>
+                  <option value="hi">Hindi</option>
+                  <option value="ja">Japanese</option>
+                  <option value="ko">Korean</option>
                 </select>
               </div>
               <div class="form-group" style="margin:0; display:flex; align-items:center; gap:8px; padding-top:20px;">
@@ -210,6 +231,7 @@ export async function renderDashboard(username, onNavigate) {
   `;
 
   // Navigation
+  document.getElementById('nav-bastyon').addEventListener('click', () => onNavigate('bastyon'));
   document.getElementById('nav-settings').addEventListener('click', () => onNavigate('settings'));
   document.getElementById('logout-btn').addEventListener('click', async () => {
     await api.logout();
@@ -453,6 +475,7 @@ export async function renderDashboard(username, onNavigate) {
     const quality = document.getElementById('yt-quality')?.value || 'best';
     const isLive = document.getElementById('yt-live')?.checked || false;
     const torrentMode = document.getElementById('torrent-mode')?.value || null;
+    const audioLanguage = document.getElementById('yt-audio-language')?.value || 'original';
     
     let startBatchIndex = parseInt(fileUrlInput.dataset.startBatch || '0', 10);
     if (!startBatchIndex && torrentMode === 'folder') {
@@ -588,7 +611,7 @@ export async function renderDashboard(username, onNavigate) {
 
     // Now fire the actual request (non-blocking — progress comes through SSE)
     try {
-      await api.transfer(url, format, quality, isLive, torrentMode, startBatchIndex, uploadToDrive);
+      await api.transfer(url, format, quality, isLive, torrentMode, startBatchIndex, uploadToDrive, audioLanguage);
     } catch (err) {
       if (!transferComplete) {
         activeTransfer = false;

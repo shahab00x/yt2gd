@@ -29,7 +29,7 @@ export const api = {
   me: () => request('GET', '/auth/me'),
   getSettings: () => request('GET', '/auth/settings'),
   saveSettings: (data) => request('POST', '/auth/settings', data),
-  transfer: (url, format, quality, isLive, torrentMode, startBatchIndex = 0, uploadToDrive = true) => request('POST', '/transfer', { url, format, quality, isLive, torrentMode, startBatchIndex, uploadToDrive }),
+  transfer: (url, format, quality, isLive, torrentMode, startBatchIndex = 0, uploadToDrive = true, audioLanguage = 'original') => request('POST', '/transfer', { url, format, quality, isLive, torrentMode, startBatchIndex, uploadToDrive, audioLanguage }),
   cancelTransfer: (transferId = null) => request('POST', '/transfer/cancel', transferId ? { transferId } : null),
   getInfo: () => request('GET', '/auth/info'),
   getCookiesStatus: () => request('GET', '/auth/cookies/status'),
@@ -65,4 +65,37 @@ export const api = {
    * Returns the EventSource object. Caller is responsible for closing it.
    */
   openProgressStream: () => new EventSource(`${BASE}/transfer/progress`, { withCredentials: true }),
+
+  // --------------------------------------------------------------------------
+  // Bastyon Uploader
+  // --------------------------------------------------------------------------
+  bastyon: {
+    getAccounts: () => request('GET', '/bastyon/accounts'),
+    addAccount: (name, wif) => request('POST', '/bastyon/accounts', { name, wif }),
+    deleteAccount: (id) => request('DELETE', `/bastyon/accounts/${id}`),
+
+    vaultStatus: () => request('GET', '/bastyon/vault/status'),
+    unlockVault: (passphrase) => request('POST', '/bastyon/vault/unlock', { passphrase }),
+    lockVault: () => request('POST', '/bastyon/vault/lock'),
+    setPassphrase: (passphrase) => request('POST', '/bastyon/vault/passphrase', { passphrase }),
+
+    download: (url, accountId, format, quality, audioLanguage) =>
+      request('POST', '/bastyon/download', { url, accountId, format, quality, audioLanguage }),
+    cancel: () => request('POST', '/bastyon/cancel'),
+
+    getDrafts: () => request('GET', '/bastyon/drafts'),
+    getDraft: (id) => request('GET', `/bastyon/drafts/${id}`),
+    updateDraft: (id, data) => request('PUT', `/bastyon/drafts/${id}`, data),
+    deleteDraft: (id) => request('DELETE', `/bastyon/drafts/${id}`),
+    publishDraft: (id) => request('POST', `/bastyon/drafts/${id}/publish`),
+
+    getStorage: () => request('GET', '/bastyon/storage'),
+    clearStaging: () => request('POST', '/bastyon/staging/clear'),
+
+    /**
+     * Open an SSE connection for Bastyon download/publish progress.
+     * Returns the EventSource object. Caller is responsible for closing it.
+     */
+    openProgressStream: () => new EventSource(`${BASE}/bastyon/progress`, { withCredentials: true }),
+  },
 };

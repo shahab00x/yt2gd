@@ -10,6 +10,7 @@
     "postinstall": "node scripts/download-yt-dlp.js"
   },
   "dependencies": {
+    "@noble/curves": "^2.3.0",
     "archiver": "^7.0.1",
     "axios": "^1.6.8",
     "bcryptjs": "^2.4.3",

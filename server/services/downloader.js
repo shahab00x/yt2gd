@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmSync, statSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, createWriteStream, createReadStream, openSync, writeSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, basename, normalize } from 'path';
 import { create } from 'youtube-dl-exec';
@@ -270,15 +270,20 @@ class ParallelDownloader {
 }
 
 /**
- * Detect if a URL is a YouTube page or a direct media link.
+ * Detect if a URL is a direct media/file link rather than a video page.
+ * Direct links keep using the high-speed parallel downloader; everything else
+ * is handed to yt-dlp, which supports the hundreds of sites listed in
+ * yt-dlp_supportedsites.md (not just YouTube).
  */
-function isYouTubePage(url) {
+const DIRECT_FILE_EXT_RE = /\.(mp4|mkv|webm|avi|mov|wmv|flv|3gp|m4v|mp3|wav|aac|ogg|m4a|opus|flac|wma|zip|rar|7z|tar|gz|bz2|xz|pdf|epub|jpg|jpeg|png|gif|webp|bmp|exe|msi|dmg|iso|apk|txt|md)$/i;
+
+function isDirectFileUrl(url) {
   try {
     const { hostname, pathname } = new URL(url);
-    const isYT = hostname.includes('youtube.com') || hostname.includes('youtu.be');
-    // If it contains /videoplayback or rrX---sn, it's a direct stream URL, not the page.
-    const isStream = hostname.includes('googlevideo.com') || pathname.includes('videoplayback');
-    return isYT && !isStream;
+    // YouTube stream URLs are direct media, not pages
+    if (hostname.includes('googlevideo.com') || pathname.includes('videoplayback')) return true;
+    const lastSegment = pathname.split('/').pop().split('?')[0].split('#')[0];
+    return DIRECT_FILE_EXT_RE.test(lastSegment);
   } catch { return false; }
 }
 
@@ -287,6 +292,213 @@ function isYouTubePage(url) {
  */
 function isMagnet(url) {
   return typeof url === 'string' && url.startsWith('magnet:?');
+}
+
+/**
+ * Detect playlist-style URLs (YouTube list= params, /playlist paths).
+ */
+export function isPlaylistUrl(url) {
+  try {
+    const { searchParams, pathname } = new URL(url);
+    if (pathname.includes('/playlist') || pathname.includes('/playlists')) return true;
+    return !!searchParams.get('list');
+  } catch { return false; }
+}
+
+/**
+ * Audio track options for the auto-dub fix (mirrors the tinnitus-sound-therapy app).
+ * 'original' relies on the `formatSort: ['lang', 'quality']` sort key, which ranks
+ * the original-language stream above YouTube's auto-dubbed/region-selected tracks.
+ */
+export const AUDIO_LANGUAGES = {
+  original: { code: null, label: 'Original (default)' },
+  en: { code: 'en', label: 'English' },
+  fa: { code: 'fa', label: 'Farsi' },
+  ar: { code: 'ar', label: 'Arabic' },
+  tr: { code: 'tr', label: 'Turkish' },
+  fr: { code: 'fr', label: 'French' },
+  de: { code: 'de', label: 'German' },
+  es: { code: 'es', label: 'Spanish' },
+  pt: { code: 'pt', label: 'Portuguese' },
+  ru: { code: 'ru', label: 'Russian' },
+  hi: { code: 'hi', label: 'Hindi' },
+  ja: { code: 'ja', label: 'Japanese' },
+  ko: { code: 'ko', label: 'Korean' },
+};
+
+/**
+ * Build a yt-dlp `-f` format selector from format/quality/audio-track preferences.
+ * The audio chain mirrors the proven tinnitus `audioFormatSelector`: prefer m4a,
+ * restrict to the requested language via [language^=code], exclude DRC duplicates
+ * ([format_id!*=drc]), then fall back to the original-track chain and finally to
+ * plain bestaudio so a download never fails on format grounds.
+ */
+export function buildFormatSelector({ format = 'video', quality = 'best', audioLanguage = 'original' } = {}) {
+  const lang = AUDIO_LANGUAGES[audioLanguage] || AUDIO_LANGUAGES.original;
+  const noDrc = '[format_id!*=drc]';
+  const alternatives = [];
+  if (lang.code) {
+    const langFilter = `[language^=${lang.code}]`;
+    alternatives.push(`bestaudio[ext=m4a]${langFilter}${noDrc}`);
+    alternatives.push(`bestaudio${langFilter}${noDrc}`);
+    // Wanted language exists but without m4a/DRC constraints — still prefer it
+    alternatives.push(`bestaudio${langFilter}`);
+  }
+  // Original-track chain ("-S lang" ranks the original first), doubling as the
+  // fallback when the requested language is unavailable.
+  alternatives.push(`bestaudio[ext=m4a]${noDrc}`);
+  alternatives.push(`bestaudio${noDrc}`);
+  alternatives.push('bestaudio');
+  const audioSelector = alternatives.join('/');
+
+  if (format === 'audio') return audioSelector;
+  if (quality === 'worst') return 'worstvideo+worstaudio/worst';
+  if (!quality || quality === 'best') return `bestvideo+${audioSelector}/best`;
+  return `bestvideo[height<=${quality}]+${audioSelector}/best[height<=${quality}]`;
+}
+
+/**
+ * Shared yt-dlp option builder. `formatSort: ['lang', 'quality']` makes every
+ * bestaudio/merge prefer the ORIGINAL language track over auto-dubbed ones.
+ */
+function buildYtdlpOptions({ output, format, quality, audioLanguage, isLive, isPlaylistUrl, printJson = false }) {
+  return {
+    output,
+    format: buildFormatSelector({ format, quality, audioLanguage }),
+    newline: true,
+    progress: true,
+    formatSort: ['lang', 'quality'], // auto-dub fix: prefer original audio track
+    ...(printJson ? { printJson: true } : {}),
+    // Only add noPlaylist for non-playlist URLs; omitting the key entirely allows playlists through
+    ...(isPlaylistUrl ? {} : { noPlaylist: true }),
+    concurrentFragments: 10, // Speed up fragment-based downloads
+    userAgent: DEFAULT_UA,
+    noJsRuntimes: true,
+    jsRuntimes: 'node',
+    remoteComponents: 'ejs:github',
+    socketTimeout: 120,
+    noCheckCertificates: true,
+    geoBypass: true,
+    // Skip unavailable videos instead of crashing
+    skipUnavailableFragments: true,
+    ignoreErrors: true, // Instruct yt-dlp to skip unavailable videos rather than halting
+    ...(isLive ? {
+      liveFromStart: true,
+      noPart: true,
+      waitForVideo: 10,
+    } : {
+      matchFilters: '!is_live',
+    }),
+  };
+}
+
+function createYtdlpExec() {
+  const binDir = join(__dirname, '../../bin');
+  const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  const localBin = join(binDir, binName);
+  return existsSync(localBin) ? create(localBin) : create('yt-dlp');
+}
+
+/** True when yt-dlp reports the URL as unsupported (error string from the extractor). */
+function isUnsupportedUrl(err) {
+  const msg = String(err?.stderr || err?.message || '');
+  return msg.includes('Unsupported URL') || msg.includes('unsupported URL');
+}
+
+/** Extract a concise user-facing message from a youtube-dl-exec error (its stderr). */
+function cleanYtdlpError(err) {
+  const stderr = String(err?.stderr || '');
+  if (stderr) {
+    const errorLines = stderr.split('\n').filter((l) => l.includes('ERROR:'));
+    if (errorLines.length) return errorLines.join(' | ').slice(0, 500);
+    return stderr.trim().slice(0, 500);
+  }
+  return String(err?.message || 'Download failed.');
+}
+
+/**
+ * Run a yt-dlp subprocess with abort + progress wiring and return its stdout text.
+ */
+function runYtdlpExec(clean, options, { url, abortSignal, onProgress }) {
+  const youtubedl = createYtdlpExec();
+  console.log(`🚀 yt-dlp starting: ${clean}`);
+  const subprocess = youtubedl.exec(clean, options);
+  let stdoutText = '';
+
+  const onAbort = () => {
+    console.log(`🛑 Cancellation triggered for ${url}`);
+    if (subprocess && typeof subprocess.kill === 'function') {
+      subprocess.kill('SIGKILL');
+    }
+  };
+
+  if (abortSignal) {
+    if (abortSignal.aborted) onAbort();
+    else abortSignal.addEventListener('abort', onAbort);
+  }
+
+  subprocess.stdout?.on('data', (chunk) => {
+    const text = chunk.toString();
+    stdoutText += text;
+    const line = text.trim();
+    if (line && onProgress) onProgress(line);
+  });
+
+  subprocess.stderr?.on('data', (chunk) => {
+    console.error(`[yt-dlp] ${chunk.toString().trim()}`);
+  });
+
+  return (async () => {
+    try {
+      await subprocess;
+    } finally {
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+    }
+    return stdoutText;
+  })();
+}
+
+/** Parse all JSON objects embedded in yt-dlp stdout lines (--print-json emits one per entry). */
+function parseJsonEntries(stdoutText) {
+  const entries = [];
+  for (const line of String(stdoutText || '').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') entries.push(parsed);
+    } catch { /* not a JSON line */ }
+  }
+  return entries;
+}
+
+/** Extract the on-disk file path from --print-json metadata (filepath/_filename/requested_downloads). */
+function metadataFilePath(metadata) {
+  for (const key of ['filepath', '_filename']) {
+    const v = metadata[key];
+    if (typeof v === 'string' && v) return v;
+  }
+  const rd = metadata.requested_downloads;
+  if (Array.isArray(rd)) {
+    for (const dl of rd) {
+      if (!dl || typeof dl !== 'object') continue;
+      for (const key of ['filepath', '_filename']) {
+        const v = dl[key];
+        if (typeof v === 'string' && v) return v;
+      }
+    }
+  }
+  return null;
+}
+
+/** Newest file inside a directory, or null. */
+function findLatestFile(dir) {
+  try {
+    const candidates = readdirSync(dir).filter((f) => statSync(join(dir, f)).isFile());
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => statSync(join(dir, b)).mtimeMs - statSync(join(dir, a)).mtimeMs);
+    return join(dir, candidates[0]);
+  } catch { return null; }
 }
 
 /**
@@ -582,13 +794,13 @@ export async function downloadTorrent(magnetUrl, onProgress = null, abortSignal 
  * Download a URL using the best method available.
  * For playlists, skips unavailable videos instead of crashing.
  */
-export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false, onBatchComplete = null, startBatchIndex = 0) {
+export async function downloadFile(url, format = 'video', quality = 'best', cookiesPath = null, onProgress = null, abortSignal = null, isLive = false, skipZip = false, onBatchComplete = null, startBatchIndex = 0, audioLanguage = 'original') {
   ensureTmpDir();
 
   const clean = cleanUrl(url);
-  const isYT = isYouTubePage(url);
+  const isDirect = isDirectFileUrl(clean);
   const isMag = isMagnet(url);
-  
+
   if (isMag) {
     return await downloadTorrent(url, onProgress, abortSignal, skipZip, onBatchComplete, startBatchIndex);
   }
@@ -599,11 +811,11 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
   const m = d.getMinutes().toString().padStart(2, '0');
   const s = d.getSeconds().toString().padStart(2, '0');
   const baseName = `${day}${h}${m}${s}`;
-  
+
   const localPath = join(TMP_DIR, `${baseName}.tmp`);
 
-  if (!isYT) {
-    // High-speed parallel path for direct URLs
+  if (isDirect) {
+    // High-speed parallel path for direct media URLs
     const downloader = new ParallelDownloader(clean, localPath, {
       onProgress: (p) => onProgress && onProgress(p.label),
       abortSignal
@@ -611,132 +823,150 @@ export async function downloadFile(url, format = 'video', quality = 'best', cook
     return await downloader.download();
   }
 
-  // yt-dlp path for YouTube pages
+  // yt-dlp path for ANY supported site (not just YouTube)
   const outputTemplate = join(TMP_DIR, `${baseName} - %(channel)s - %(title)s.%(ext)s`);
-
-  let formatStr;
-  if (format === 'audio') {
-    formatStr = 'bestaudio/best';
-  } else if (quality === 'best' || quality === 'worst') {
-    formatStr = quality === 'best' ? 'bestvideo+bestaudio/best' : 'worstvideo+worstaudio/worst';
-  } else {
-    formatStr = `bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]`;
-  }
-
   const isPlaylistUrl = clean.includes('list=');
-
-  const options = {
+  const options = buildYtdlpOptions({
     output: outputTemplate,
-    format: formatStr,
-    newline: true,
-    progress: true,
-    // Only add noPlaylist for non-playlist URLs; omitting the key entirely allows playlists through
-    ...(isPlaylistUrl ? {} : { noPlaylist: true }),
-    concurrentFragments: 10, // Speed up fragment-based downloads
-    userAgent: DEFAULT_UA,
-    noJsRuntimes: true,
-    jsRuntimes: 'node',
-    remoteComponents: 'ejs:github',
-    socketTimeout: 120,
-    noCheckCertificates: true,
-    geoBypass: true,
-    // Skip unavailable videos instead of crashing
-    skipUnavailableFragments: true,
-    ignoreErrors: true, // Instruct yt-dlp to skip unavailable videos rather than halting
-    ...(isLive ? {
-      liveFromStart: true,
-      noPart: true,
-      waitForVideo: 10,
-    } : {
-      matchFilters: '!is_live',
-    }),
-  };
+    format,
+    quality,
+    audioLanguage,
+    isLive,
+    isPlaylistUrl,
+  });
 
   if (cookiesPath && existsSync(cookiesPath)) {
     options.cookies = cookiesPath;
   }
 
-  const binDir = join(__dirname, '../../bin');
-  const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-  const localBin = join(binDir, binName);
-  const youtubedl = existsSync(localBin) ? create(localBin) : create('yt-dlp');
+  const finalizeFiles = async () => {
+    const files = readdirSync(TMP_DIR).filter(f => f.startsWith(`${baseName} - `));
 
-  console.log(`🚀 yt-dlp starting: ${clean}`);
+    if (!files.length) throw new Error('Download finished but no output file found.');
 
-  const subprocess = youtubedl.exec(clean, options);
+    // --- FIX: Handle multiple files (playlists) ---
+    if (files.length > 1) {
+      console.log(`📂 Playlist detected: ${files.length} videos downloaded`);
 
-  const onAbort = () => {
-    console.log(`🛑 Cancellation triggered for ${url}`);
-    if (subprocess && typeof subprocess.kill === 'function') {
-      subprocess.kill('SIGKILL');
+      const playlistFolderId = `playlist_${Date.now()}`;
+      const playlistDir = join(TMP_DIR, playlistFolderId);
+
+      if (!existsSync(playlistDir)) mkdirSync(playlistDir, { recursive: true });
+
+      // Move all files into the playlist folder
+      for (const file of files) {
+        const srcPath = join(TMP_DIR, file);
+        const destPath = join(playlistDir, file);
+        try {
+          const fs = await import('fs/promises');
+          await fs.rename(srcPath, destPath);
+        } catch (err) {
+          console.warn(`⚠️ Could not rename ${file}, using copy instead`);
+          const fs = await import('fs/promises');
+          await fs.copyFile(srcPath, destPath);
+          await fs.unlink(srcPath);
+        }
+      }
+
+      console.log(`✅ Organized playlist files in ${playlistFolderId}`);
+
+      return {
+        downloadDir: playlistDir,
+        torrentName: `Playlist_${Date.now()}`,
+        parentDir: playlistDir,
+        isPlaylist: true
+      };
     }
+
+    return join(TMP_DIR, files[0]);
   };
 
-  if (abortSignal) {
-    if (abortSignal.aborted) onAbort();
-    else abortSignal.addEventListener('abort', onAbort);
-  }
-
-  subprocess.stdout?.on('data', (chunk) => {
-    const line = chunk.toString().trim();
-    if (line && onProgress) onProgress(line);
-  });
-
-  subprocess.stderr?.on('data', (chunk) => {
-    console.error(`[yt-dlp] ${chunk.toString().trim()}`);
-  });
-
   try {
-    await subprocess;
+    await runYtdlpExec(clean, options, { url, abortSignal, onProgress });
+    return await finalizeFiles();
   } catch (err) {
     if (abortSignal?.aborted) throw new Error('Download was cancelled by user.');
+    if (isUnsupportedUrl(err)) {
+      console.warn(`⚠️ yt-dlp does not support "${clean}", falling back to direct download.`);
+      const downloader = new ParallelDownloader(clean, localPath, {
+        onProgress: (p) => onProgress && onProgress(p.label),
+        abortSignal
+      });
+      return await downloader.download();
+    }
+    // Partial playlist downloads should still be organized/uploaded instead of crashing
     const files = readdirSync(TMP_DIR).filter(f => f.startsWith(`${baseName} - `));
     if (files.length > 0) {
-      console.warn(`⚠️ yt-dlp exited with an error, but ${files.length} files were downloaded successfully. Continuing. Error:`, err.message);
-    } else {
-      throw err;
+      console.warn(`⚠️ yt-dlp exited with an error, but ${files.length} files were downloaded successfully. Continuing. Error:`, cleanYtdlpError(err));
+      return await finalizeFiles();
     }
-  } finally {
-    if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+    throw new Error(cleanYtdlpError(err));
+  }
+}
+
+/**
+ * Download a single video with yt-dlp and return BOTH the local file path and the
+ * extracted metadata (title/description/tags/thumbnail/original URL), using
+ * --print-json. Used by the Bastyon Uploader to build an editable draft post.
+ * Playlist and torrent/direct-file URLs are rejected up front.
+ */
+export async function downloadWithMetadata(url, { format = 'video', quality = 'best', audioLanguage = 'original', cookiesPath = null, onProgress = null, abortSignal = null, outputDir = null } = {}) {
+  ensureTmpDir();
+
+  const clean = cleanUrl(url);
+  if (isMagnet(clean)) {
+    throw new Error('Torrent/magnet links are not supported in the Bastyon Uploader.');
+  }
+  if (isDirectFileUrl(clean)) {
+    throw new Error('Direct file URLs are not supported in the Bastyon Uploader — paste a video page URL instead.');
+  }
+  if (isPlaylistUrl(clean)) {
+    throw new Error('Playlist URLs are not supported in the Bastyon Uploader. Use the Dashboard to download playlists.');
   }
 
-  const files = readdirSync(TMP_DIR).filter(f => f.startsWith(`${baseName} - `));
-
-  if (!files.length) throw new Error('Download finished but no output file found.');
-
-  // --- FIX: Handle multiple files (playlists) ---
-  if (files.length > 1) {
-    console.log(`📂 Playlist detected: ${files.length} videos downloaded`);
-    
-    const playlistFolderId = `playlist_${Date.now()}`;
-    const playlistDir = join(TMP_DIR, playlistFolderId);
-    
-    if (!existsSync(playlistDir)) mkdirSync(playlistDir, { recursive: true });
-    
-    // Move all files into the playlist folder
-    for (const file of files) {
-      const srcPath = join(TMP_DIR, file);
-      const destPath = join(playlistDir, file);
-      try {
-        const fs = await import('fs/promises');
-        await fs.rename(srcPath, destPath);
-      } catch (err) {
-        console.warn(`⚠️ Could not rename ${file}, using copy instead`);
-        const fs = await import('fs/promises');
-        await fs.copyFile(srcPath, destPath);
-        await fs.unlink(srcPath);
-      }
-    }
-    
-    console.log(`✅ Organized playlist files in ${playlistFolderId}`);
-    
-    return {
-      downloadDir: playlistDir,
-      torrentName: `Playlist_${Date.now()}`,
-      parentDir: playlistDir,
-      isPlaylist: true
-    };
+  const targetDir = outputDir || mkdtempSync(join(TMP_DIR, 'bastyon-'));
+  if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+  const outputTemplate = join(targetDir, '%(title)s.%(ext)s');
+  const options = buildYtdlpOptions({
+    output: outputTemplate,
+    format,
+    quality,
+    audioLanguage,
+    isLive: false,
+    isPlaylistUrl: false,
+    printJson: true,
+  });
+  if (cookiesPath && existsSync(cookiesPath)) {
+    options.cookies = cookiesPath;
   }
 
-  return join(TMP_DIR, files[0]);
+  let stdoutText;
+  try {
+    stdoutText = await runYtdlpExec(clean, options, { url: clean, abortSignal, onProgress });
+  } catch (err) {
+    if (abortSignal?.aborted) throw new Error('Download was cancelled by user.');
+    throw new Error(cleanYtdlpError(err));
+  }
+
+  const jsonEntries = parseJsonEntries(stdoutText);
+  if (!jsonEntries.length) throw new Error('yt-dlp did not return parseable metadata.');
+  if (jsonEntries.length > 1) {
+    throw new Error('Playlist URLs are not supported in the Bastyon Uploader. Use the Dashboard to download playlists.');
+  }
+  const metadata = jsonEntries[jsonEntries.length - 1];
+
+  const filePath = metadataFilePath(metadata) || findLatestFile(targetDir);
+  if (!filePath || !existsSync(filePath)) {
+    throw new Error('Download finished but no output file found.');
+  }
+
+  const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : [];
+  return {
+    filePath,
+    title: String(metadata.title || ''),
+    description: String(metadata.description || ''),
+    tags,
+    thumbnail: String(metadata.thumbnail || ''),
+    originalUrl: String(metadata.original_url || metadata.webpage_url || clean),
+  };
 }

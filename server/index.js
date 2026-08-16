@@ -8,6 +8,7 @@ import { clearTmp } from './services/downloader.js';
 import authRoutes from './routes/auth.js';
 import transferRoutes from './routes/transfer.js';
 import systemRoutes from './routes/system.js';
+import bastyonRoutes from './routes/bastyon.js';
 
 import { exec } from 'child_process';
 
@@ -37,6 +38,7 @@ app.use(session({
 app.use('/api/auth', authRoutes);
 app.use('/api/transfer', transferRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/bastyon', bastyonRoutes);
 
 // Serve the Vite production build (when running in production)
 const clientDistPath = join(__dirname, '../client/dist');

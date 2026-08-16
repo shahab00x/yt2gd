@@ -93,7 +93,7 @@ router.get('/list', (req, res) => {
  * POST /api/transfer
  */
 router.post('/', async (req, res) => {
-  const { url, format = 'video', quality = 'best', isLive = false, torrentMode, startBatchIndex = 0, uploadToDrive = true } = req.body;
+  const { url, format = 'video', quality = 'best', isLive = false, torrentMode, startBatchIndex = 0, uploadToDrive = true, audioLanguage = 'original' } = req.body;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'A valid URL is required.' });
@@ -175,7 +175,7 @@ router.post('/', async (req, res) => {
 
     const downloadResult = await downloadFile(url, format, quality, cookiesPath, (line) => {
       sendSSE('progress', { phase: 'download', line });
-    }, signal, isLive, skipZip, onBatchComplete, startBatchIndex);
+    }, signal, isLive, skipZip, onBatchComplete, startBatchIndex, audioLanguage);
 
     console.log(`🔍 Download result:`, downloadResult);
     if (downloadResult.completed) {

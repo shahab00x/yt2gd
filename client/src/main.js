@@ -11,6 +11,7 @@ import { api } from './api.js';
 import { renderLogin } from './views/login.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderSettings } from './views/settings.js';
+import { renderBastyon } from './views/bastyon.js';
 
 let currentUser = null;
 
@@ -25,6 +26,10 @@ function navigate(view) {
   }
   if (view === 'dashboard') {
     renderDashboard(currentUser, navigate);
+    return;
+  }
+  if (view === 'bastyon') {
+    renderBastyon(currentUser, navigate);
     return;
   }
   if (view === 'settings') {
