@@ -335,3 +335,49 @@ test('rpc deserialization error', async () => {
     m.mock.restore();
   }
 });
+
+// --- PeerTube instance list (media.js) ---
+
+import { parsePeertubeList } from './media.js';
+
+test('parse peertube instance list filters testnet, offline, non-upload and special hosts', () => {
+  const list = {
+    swarms: {
+      s1: {
+        list: [
+          { host: 'peertube1.pocketnet.app', upload: true, online: true },
+          { host: 'peertube2.pocketnet.app', upload: false, online: true },
+          { host: 'peertube3.pocketnet.app', upload: true, online: false },
+          { host: 'peertube4.pocketnet.app', upload: true, online: true, special: true },
+          { host: 'peertube5.pocketnet.app', upload: true, online: true },
+        ],
+      },
+      s2: { testnet: true, list: [{ host: 'test.peertube.pocketnet.app', upload: true, online: true }] },
+      s3: { list: [] },
+    },
+  };
+  assert.deepEqual(parsePeertubeList(list), [
+    'https://peertube1.pocketnet.app',
+    'https://peertube5.pocketnet.app',
+  ]);
+});
+
+test('parse peertube instance list dedupes hosts and ignores malformed entries', () => {
+  const list = {
+    swarms: {
+      s1: { list: [
+        { host: 'peertube1.pocketnet.app', upload: true, online: true },
+        { host: 'peertube1.pocketnet.app', upload: true, online: true },
+        { host: 'nofields.pocketnet.app' },
+        null,
+      ] },
+    },
+  };
+  assert.deepEqual(parsePeertubeList(list), ['https://peertube1.pocketnet.app']);
+});
+
+test('parse peertube instance list rejects empty and invalid input', () => {
+  assert.deepEqual(parsePeertubeList(null), []);
+  assert.deepEqual(parsePeertubeList({}), []);
+  assert.deepEqual(parsePeertubeList({ swarms: {} }), []);
+});

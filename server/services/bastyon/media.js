@@ -14,9 +14,76 @@ export const PEERTUBE_HOSTS = [
   'https://peertube331.pocketnet.app',
   'https://peertube.pocketnet.app',
   'https://peertube.bastyon.com',
+  'https://peertube101.pocketnet.app',
+  'https://peertube1000.pocketnet.app',
+  'https://peertube372.pocketnet.app',
+  'https://peertube160.pocketnet.app',
 ];
 
+// Live instance registry used by the official pocketnet.gui (proxy16/config.json:
+// "peertubesListLink"). Maintained by the Bastyon team; each entry carries
+// online/upload status so we can pick working upload targets dynamically.
+export const PEERTUBE_LIST_URL =
+  'https://raw.githubusercontent.com/shpingalet007/bastyon-peertubes/master/list.json';
+
+const INSTANCE_LIST_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const PROBE_CONCURRENCY = 6;
 const SIMPLE_UPLOAD_THRESHOLD = 50 * 1024 * 1024; // 50MB
+
+let instanceCache = null;
+let instanceCacheTime = 0;
+
+/** Flatten the bastyon-peertubes list.json into upload-capable https host URLs. */
+export function parsePeertubeList(list) {
+  if (!list || typeof list !== 'object') return [];
+  const hosts = [];
+  for (const swarm of Object.values(list.swarms || {})) {
+    if (!swarm || swarm.testnet) continue;
+    for (const server of swarm.list || []) {
+      if (server && server.host && server.upload === true && server.online === true && !server.special) {
+        hosts.push(`https://${server.host}`);
+      }
+    }
+  }
+  return [...new Set(hosts)];
+}
+
+/** Fetch the live PeerTube instance list, cached per TTL. Returns [] on failure. */
+export async function fetchPeertubeInstances() {
+  if (instanceCache && Date.now() - instanceCacheTime < INSTANCE_LIST_TTL_MS) {
+    return instanceCache;
+  }
+  try {
+    const resp = await axios.get(PEERTUBE_LIST_URL, { timeout: 15_000 });
+    const hosts = parsePeertubeList(resp.data);
+    instanceCache = hosts;
+    instanceCacheTime = Date.now();
+    return hosts;
+  } catch (e) {
+    console.warn(`[Bastyon] Failed to fetch PeerTube instance list (${e.message}); using static fallback hosts.`);
+    return [];
+  }
+}
+
+/** Probe hosts with the cheap oauth-clients endpoint and order reachable ones first. */
+export async function probePeertubeHosts(hosts, concurrency = PROBE_CONCURRENCY) {
+  const results = [];
+  let index = 0;
+  const worker = async () => {
+    while (index < hosts.length) {
+      const host = hosts[index++];
+      try {
+        const resp = await axios.get(`${host}/api/v1/oauth-clients/local`, { timeout: 5000 });
+        results.push({ host, alive: resp.status === 200 });
+      } catch {
+        results.push({ host, alive: false });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, hosts.length) }, worker));
+  results.sort((a, b) => (b.alive ? 1 : 0) - (a.alive ? 1 : 0));
+  return results.map((r) => r.host);
+}
 
 export class MediaUploadError extends Error {}
 
@@ -393,7 +460,13 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
 export async function uploadVideo(filePath, account, peertubeHost = null, onProgress = null) {
   if (!requireExists(filePath)) throw new MediaUploadError(`Video file not found: ${filePath}`);
 
-  const hosts = peertubeHost ? [peertubeHost] : PEERTUBE_HOSTS;
+  let hosts;
+  if (peertubeHost) {
+    hosts = [peertubeHost];
+  } else {
+    const dynamic = await fetchPeertubeInstances();
+    hosts = dynamic.length ? await probePeertubeHosts(dynamic) : PEERTUBE_HOSTS;
+  }
   const failures = [];
   for (const host of hosts) {
     const normalizedHost = String(host).replace(/\/+$/, '');
