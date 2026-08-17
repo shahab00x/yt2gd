@@ -19,6 +19,7 @@ import { buildAndSignPostTransaction } from '../services/bastyon/transaction.js'
 import { BastyonRpcClient } from '../services/bastyon/rpc.js';
 import { uploadVideo, uploadImage, MediaUploadError } from '../services/bastyon/media.js';
 import { trimVideo, isFfmpegAvailable } from '../services/bastyon/trim.js';
+import { transcodeVideo, probeVideo, needsTranscode, isFfprobeAvailable } from '../services/bastyon/transcode.js';
 import * as vault from '../services/bastyon/vault.js';
 import * as accounts from '../services/bastyon/accounts.js';
 import * as drafts from '../services/bastyon/drafts.js';
@@ -268,7 +269,7 @@ router.put('/drafts/:id', (req, res) => {
     return res.status(400).json({ error: `Cannot edit a ${draft.status} draft.` });
   }
 
-  const { title, description, tags, accountId, trimStart, trimEnd } = req.body || {};
+  const { title, description, tags, accountId, trimStart, trimEnd, transcode } = req.body || {};
   const patch = {};
 
   if (title !== undefined) patch.title = String(title);
@@ -276,6 +277,7 @@ router.put('/drafts/:id', (req, res) => {
   if (tags !== undefined) patch.tags = Array.isArray(tags) ? tags.map(String) : String(tags).split(',').map((t) => t.trim()).filter(Boolean);
   if (trimStart !== undefined) patch.trimStart = String(trimStart || '');
   if (trimEnd !== undefined) patch.trimEnd = String(trimEnd || '');
+  if (transcode !== undefined) patch.transcode = Boolean(transcode);
   if (accountId !== undefined) {
     const acc = accounts.getAccountById(accountId);
     if (accountId && !acc) return res.status(400).json({ error: 'Selected account not found.' });
@@ -301,8 +303,8 @@ router.delete('/drafts/:id', (req, res) => {
 
 /**
  * POST /api/bastyon/drafts/:id/publish
- * Trims (if set) → uploads video to PeerTube → thumbnail (best-effort) →
- * builds & signs the "share" transaction → broadcasts → returns the TxID.
+ * Fetch thumbnail → trim (if set) → transcode (if enabled & needed) →
+ * upload video (with thumbnail + title) → post image → sign & broadcast.
  */
 router.post('/drafts/:id/publish', async (req, res) => {
   const draft = drafts.getDraft(req.params.id);
@@ -332,6 +334,10 @@ router.post('/drafts/:id/publish', async (req, res) => {
     }
   };
 
+  let trimmedPath = null;
+  let transcodedPath = null;
+  let thumbPath = null;
+
   try {
     // 1. Resolve account + decrypt WIF (requires unlocked vault)
     const accountRecord = accounts.getAccountById(draft.accountId);
@@ -348,9 +354,23 @@ router.post('/drafts/:id/publish', async (req, res) => {
     }
     const account = Account.fromWif(wif);
 
-    // 2. Trim (optional)
+    // 2. Fetch thumbnail (best-effort, non-fatal) BEFORE upload so it can be
+    //    attached to the video in the same request.
+    const images = [];
+    if (draft.thumbnailUrl) {
+      try {
+        sendBastyonSSE(req, 'status', { draftId: draft.id, phase: 'thumbnail', message: 'Fetching thumbnail…' });
+        thumbPath = join(stagingDir, `thumb_${Date.now()}.jpg`);
+        const thumbResp = await axios.get(draft.thumbnailUrl, { responseType: 'arraybuffer', timeout: 20_000 });
+        writeFileSync(thumbPath, Buffer.from(thumbResp.data));
+      } catch (e) {
+        thumbPath = null;
+        console.warn('[Bastyon] Thumbnail fetch failed (continuing without it):', e.message);
+      }
+    }
+
+    // 3. Trim (optional)
     let uploadPath = draft.filePath;
-    let trimmedPath = null;
     if (draft.trimStart || draft.trimEnd) {
       if (!isFfmpegAvailable()) {
         throw new Error('ffmpeg is not installed on this server, so trimming is unavailable. Clear the trim fields to publish as-is.');
@@ -360,31 +380,46 @@ router.post('/drafts/:id/publish', async (req, res) => {
       uploadPath = trimmedPath;
     }
 
-    // 3. Upload video to PeerTube
+    // 4. Transcode / normalize (optional, enabled by default)
+    if (draft.transcode !== false) {
+      if (!isFfmpegAvailable() || !isFfprobeAvailable()) {
+        throw new Error('ffmpeg/ffprobe is not installed on this server, so normalization is unavailable. Disable "Normalize before upload" to publish as-is.');
+      }
+      sendBastyonSSE(req, 'status', { draftId: draft.id, phase: 'transcode', message: 'Checking video…' });
+      const probe = await probeVideo(uploadPath);
+      if (needsTranscode(probe)) {
+        sendBastyonSSE(req, 'status', { draftId: draft.id, phase: 'transcode', message: 'Normalizing video…' });
+        transcodedPath = await transcodeVideo(uploadPath, {
+          outputPath: join(stagingDir, `transcode_${Date.now()}.mp4`),
+          abortSignal: signal,
+          onProgress: (p) => {
+            if (p && p.percent != null) sendBastyonSSE(req, 'progress', { draftId: draft.id, phase: 'transcode', percent: Math.round(p.percent) });
+          },
+        });
+        uploadPath = transcodedPath;
+      }
+    }
+
+    // 5. Upload video to PeerTube (attach thumbnail + title)
     sendBastyonSSE(req, 'status', { draftId: draft.id, phase: 'upload', message: 'Authenticating with PeerTube…' });
     const peertubeUrl = await uploadVideo(uploadPath, account, null, (p) => {
       if (p && p.label) sendBastyonSSE(req, 'progress', { draftId: draft.id, phase: 'upload', label: p.label });
-    });
+    }, { thumbnailPath: thumbPath, title: draft.title });
     if (!peertubeUrl || !peertubeUrl.startsWith('peertube://')) {
       throw new MediaUploadError(`Video upload returned invalid URL: ${peertubeUrl}`);
     }
 
-    // 4. Thumbnail image (best-effort, non-fatal)
-    const images = [];
-    let thumbPath = null;
-    if (draft.thumbnailUrl) {
+    // 6. Thumbnail as post image (reuse the already-downloaded file)
+    if (thumbPath) {
       try {
-        thumbPath = join(stagingDir, `thumb_${Date.now()}.jpg`);
-        const thumbResp = await axios.get(draft.thumbnailUrl, { responseType: 'arraybuffer', timeout: 20_000 });
-        writeFileSync(thumbPath, Buffer.from(thumbResp.data));
         const imageUrl = await uploadImage(thumbPath);
         if (imageUrl) images.push(imageUrl);
       } catch (e) {
-        console.warn('[Bastyon] Thumbnail attach failed (continuing without it):', e.message);
+        console.warn('[Bastyon] Thumbnail upload as post image failed (continuing without it):', e.message);
       }
     }
 
-    // 5. UTXOs
+    // 7. UTXOs
     sendBastyonSSE(req, 'status', { draftId: draft.id, phase: 'broadcast', message: 'Fetching account funds…' });
     const rpc = new BastyonRpcClient();
     const utxos = await rpc.getUtxos(account.address);
@@ -392,7 +427,7 @@ router.post('/drafts/:id/publish', async (req, res) => {
       throw new Error(`No confirmed UTXOs found for address ${account.address}. Ensure the account has a small PKOIN balance.`);
     }
 
-    // 6. Payload + transaction
+    // 8. Payload + transaction
     const payload = buildPayload({
       message: draft.description || draft.title || '',
       caption: draft.title || '',
@@ -403,12 +438,12 @@ router.post('/drafts/:id/publish', async (req, res) => {
     });
     const signedTx = buildAndSignPostTransaction({ account, utxos, payload, txType: 'video' });
 
-    // 7. Broadcast
+    // 9. Broadcast
     sendBastyonSSE(req, 'status', { draftId: draft.id, phase: 'broadcast', message: 'Broadcasting to the blockchain…' });
     const txid = await rpc.broadcast(signedTx);
 
-    // 8. Success — clean up local files, mark published
-    await cleanupTemp([trimmedPath, thumbPath, draft.filePath]);
+    // 10. Success — clean up local files, mark published
+    await cleanupTemp([trimmedPath, transcodedPath, thumbPath, draft.filePath]);
     drafts.updateDraft(draft.id, { status: 'published', txid, error: '', fileSize: 0 });
 
     sendBastyonSSE(req, 'done', { draftId: draft.id, success: true, txid });
@@ -416,6 +451,8 @@ router.post('/drafts/:id/publish', async (req, res) => {
     return res.json({ success: true, txid });
   } catch (err) {
     console.error('[Bastyon] Publish failed:', err.message);
+    // Keep the original downloaded file for retry; discard intermediate artifacts.
+    await cleanupTemp([trimmedPath, transcodedPath, thumbPath]);
     const status = err instanceof vault.VaultLockedError ? 'draft' : 'failed';
     drafts.updateDraft(draft.id, { status, error: err.message });
     delete req.app.locals.bastyonActive[sessionId];

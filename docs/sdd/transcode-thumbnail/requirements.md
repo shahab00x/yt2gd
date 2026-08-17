@@ -26,7 +26,7 @@ When normalization is enabled, the system **shall** probe the input with `ffprob
 When the source uses a non-H.264 video codec (e.g. VP9/AV1) or a non-AAC/MP3 audio codec (e.g. Opus/Vorbis), the system **shall** transcode even when bitrate/resolution/fps are within limits, so the upload is always H.264 + AAC/MP3 in an MP4 container.
 
 ### REQ-TRX-5 — Never Upscale
-When transcoding, the system **shall** scale with a maximum height of `min(720, source_height)`, so a source below 720p **shall** never be upscaled (matching the Bastyon desktop client's `scale=-2:min(720,ih)`).
+When transcoding, the system **shall** scale with a maximum height of `min(720, source_height)`, so a source below 720p **shall** never be upscaled (matching the Bastyon desktop client's `scale=-2:min'(720,ih)'`).
 
 ### REQ-TRX-6 — Bitrate & Framerate Targeting
 When transcoding, the system **shall** set the target video bitrate to `min(2600, source_video_bitrate)` kbps, the target audio bitrate to `min(256, source_audio_bitrate)` kbps, and the target frame rate to `min(25, source_fps)`.

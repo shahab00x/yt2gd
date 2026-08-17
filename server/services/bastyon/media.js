@@ -251,8 +251,12 @@ export async function getPeertubeChannelId(token, host, timeout = 10) {
   throw new MediaUploadError('PeerTube user has no video channels configured.');
 }
 
-/** Upload a video file to one PeerTube host via simple or resumable upload API. */
-export async function uploadToPeertube(filePath, account, host, onProgress = null) {
+/**
+ * Upload a video file to one PeerTube host via simple or resumable upload API.
+ * `opts.thumbnailPath` attaches the cover (thumbnailfile) and preview (previewfile)
+ * fields, mirroring the Bastyon desktop client; `opts.title` sets the video name.
+ */
+export async function uploadToPeertube(filePath, account, host, onProgress = null, { thumbnailPath = null, title = '' } = {}) {
   if (!requireExists(filePath)) throw new MediaUploadError(`Video file not found: ${filePath}`);
 
   const fileSize = statSync(filePath).size;
@@ -272,9 +276,19 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
     throw new MediaUploadError(`${normalizedHost}: PeerTube authentication failed: ${e.message}`);
   }
 
-  const uniqueName = `${basename(filePath, extname(filePath))}-${randomUUID().slice(0, 8)}`;
+  const videoTitle = String(title || '').trim();
+  const uniqueName = videoTitle || `${basename(filePath, extname(filePath))}-${randomUUID().slice(0, 8)}`;
   const headers = { Authorization: `Bearer ${token}` };
   const hostDomain = normalizedHost.replace(/^https?:\/\//, '').split('/')[0];
+
+  const appendThumbnailFields = (form) => {
+    if (!thumbnailPath || !requireExists(thumbnailPath)) return;
+    const thumbMime = guessMime(thumbnailPath) || 'image/jpeg';
+    const thumbFilename = basename(thumbnailPath);
+    // Two separate streams: form-data can only read a stream once.
+    form.append('thumbnailfile', createReadStream(thumbnailPath), { filename: thumbFilename, contentType: thumbMime });
+    form.append('previewfile', createReadStream(thumbnailPath), { filename: thumbFilename, contentType: thumbMime });
+  };
 
   let respData = null;
 
@@ -289,6 +303,7 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
     form.append('privacy', '1');
     form.append('channelId', String(channelId));
     form.append('name', uniqueName);
+    appendThumbnailFields(form);
 
     const maxRetries = 3;
     let lastErr = null;
@@ -328,17 +343,18 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
       'X-Upload-Content-Length': String(fileSize),
       'X-Upload-Content-Type': mimeType,
     };
-    const initData = new URLSearchParams({
-      filename: basename(filePath),
-      name: uniqueName,
-      channelId: String(channelId),
-      privacy: '1',
-    });
+    // Multipart init (matching the desktop client) so the image fields can be carried.
+    const initData = new FormData();
+    initData.append('filename', basename(filePath));
+    initData.append('name', uniqueName);
+    initData.append('channelId', String(channelId));
+    initData.append('privacy', '1');
+    appendThumbnailFields(initData);
 
     let initResp;
     try {
       initResp = await axios.post(`${normalizedHost}/api/v1/videos/upload-resumable`, initData, {
-        headers: initHeaders,
+        headers: { ...initHeaders, ...initData.getHeaders() },
         timeout: 60_000,
       });
     } catch (e) {
@@ -462,7 +478,7 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
 }
 
 /** Upload a video file to PeerTube, trying fallback hosts unless one is specified. */
-export async function uploadVideo(filePath, account, peertubeHost = null, onProgress = null) {
+export async function uploadVideo(filePath, account, peertubeHost = null, onProgress = null, opts = {}) {
   if (!requireExists(filePath)) throw new MediaUploadError(`Video file not found: ${filePath}`);
 
   let hosts;
@@ -480,7 +496,7 @@ export async function uploadVideo(filePath, account, peertubeHost = null, onProg
   for (const host of hosts) {
     const normalizedHost = String(host).replace(/\/+$/, '');
     try {
-      return await uploadToPeertube(filePath, account, normalizedHost, onProgress);
+      return await uploadToPeertube(filePath, account, normalizedHost, onProgress, opts);
     } catch (e) {
       // uploadToPeertube already prefixes some errors with the host — avoid doubling it.
       const msg = e.message || String(e);

@@ -62,6 +62,7 @@ export function createDraft(data) {
     thumbnailUrl: data.thumbnailUrl || '',
     trimStart: '',
     trimEnd: '',
+    transcode: data.transcode !== false,
     filePath: data.filePath || '',
     fileSize: data.fileSize || 0,
     txid: '',

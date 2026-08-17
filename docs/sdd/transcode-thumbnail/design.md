@@ -67,7 +67,7 @@ codec check, so a YouTube VP9/AV1/Opus download always gets normalized even at l
 ffmpeg -y -i <input>
   -c:v libx264
   -c:a libmp3lame
-  -vf scale=-2:min(720,ih)
+  -vf scale=-2:min'(720,ih)'
   -qmin 25 -qmax 35
   -preset veryfast
   -b:v <targetVideoBitrate>k      # omitted when videoBitrate is null (CRF fallback)
@@ -90,7 +90,7 @@ targetFps          = min(25,   probe.frameRate)
 | :--- | :--- | :--- |
 | video codec | `libx264` | `transcoding2.js` |
 | audio codec | `libmp3lame` | `transcoding2.js` |
-| scale | `scale=-2:min(720,ih)` | `transcoding2.js` (typo'd quote in the reference corrected) |
+| scale | `scale=-2:min'(720,ih)'` | `transcoding2.js` (single quotes are REQUIRED ffmpeg quoting for the comma in `min()`) |
 | qmin/qmax | `25` / `35` | `transcoding2.js` |
 | preset | `veryfast` | `transcoding2.js` |
 | video bitrate | `min(2600, src)` kbps | `transcoding2.js` |

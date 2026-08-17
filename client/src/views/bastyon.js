@@ -197,6 +197,12 @@ export function renderBastyon(username, onNavigate) {
               <label for="draft-trim-end">Trim End <span class="hint" style="font-weight:normal;">(optional)</span></label>
               <input id="draft-trim-end" class="form-control" type="text" placeholder="e.g. 02:45" />
             </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:0.9rem;">
+                <input id="draft-transcode" type="checkbox" checked style="width:auto;" />
+                Normalize video before upload (H.264 ≤720p, capped bitrate/fps — never upscales)
+              </label>
+            </div>
           </div>
 
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px;">
@@ -501,6 +507,7 @@ export function renderBastyon(username, onNavigate) {
     document.getElementById('draft-tags').value = (draft.tags || []).join(', ');
     document.getElementById('draft-trim-start').value = draft.trimStart || '';
     document.getElementById('draft-trim-end').value = draft.trimEnd || '';
+    document.getElementById('draft-transcode').checked = draft.transcode !== false;
     const accountSel = document.getElementById('draft-account');
     accountSel.innerHTML = accountOptions(draft.accountId || '');
     document.getElementById('publish-result').style.display = 'none';
@@ -523,6 +530,7 @@ export function renderBastyon(username, onNavigate) {
       accountId: document.getElementById('draft-account').value,
       trimStart: document.getElementById('draft-trim-start').value.trim(),
       trimEnd: document.getElementById('draft-trim-end').value.trim(),
+      transcode: document.getElementById('draft-transcode').checked,
     };
     const updated = await api.bastyon.updateDraft(draft.id, payload);
     state.drafts = state.drafts.map((d) => (d.id === updated.draft.id ? updated.draft : d));
@@ -693,6 +701,9 @@ export function renderBastyon(username, onNavigate) {
 
   // ---------------- SSE progress ----------------
   const evtSource = api.bastyon.openProgressStream();
+  const publishStep = document.getElementById('publish-progress-step');
+  const publishFill = document.getElementById('publish-progress-fill');
+  const publishDetail = document.getElementById('publish-progress-detail');
 
   evtSource.addEventListener('status', (e) => {
     const data = JSON.parse(e.data);
@@ -700,13 +711,17 @@ export function renderBastyon(username, onNavigate) {
       progressStep.textContent = 'Downloading…';
       progressFill.style.width = '15%';
     } else if (data.phase === 'trim') {
-      progressStep.textContent = 'Trimming…';
+      publishStep.textContent = 'Trimming…';
+    } else if (data.phase === 'transcode') {
+      publishStep.textContent = 'Normalizing video…';
+    } else if (data.phase === 'thumbnail') {
+      publishStep.textContent = 'Fetching thumbnail…';
     } else if (data.phase === 'upload') {
-      progressStep.textContent = 'Uploading to PeerTube…';
-      progressFill.style.width = '50%';
+      publishStep.textContent = 'Uploading to PeerTube…';
+      publishFill.style.width = '50%';
     } else if (data.phase === 'broadcast') {
-      progressStep.textContent = 'Broadcasting to blockchain…';
-      progressFill.style.width = '85%';
+      publishStep.textContent = 'Broadcasting to blockchain…';
+      publishFill.style.width = '85%';
     }
   });
 
@@ -715,7 +730,11 @@ export function renderBastyon(username, onNavigate) {
     if (data.phase === 'download') {
       if (data.line) progressDetail.textContent = data.line.substring(0, 120);
     } else if (data.phase === 'upload' && data.label) {
-      progressDetail.textContent = data.label;
+      publishDetail.textContent = data.label;
+    } else if (data.phase === 'transcode' && data.percent != null) {
+      const percent = Math.max(0, Math.min(100, Math.round(data.percent)));
+      publishFill.style.width = `${15 + Math.round((percent / 100) * 30)}%`;
+      publishDetail.textContent = `Normalizing… ${percent}%`;
     }
   });
 
