@@ -52,7 +52,7 @@ export function createDraft(data) {
   const now = Date.now();
   const draft = {
     id: `draft_${now}_${randomUUID().slice(0, 8)}`,
-    status: 'draft',
+    status: data.status || 'draft',
     sourceUrl: data.sourceUrl || '',
     accountId: data.accountId || null,
     accountName: data.accountName || '',

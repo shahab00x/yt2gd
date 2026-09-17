@@ -32,12 +32,12 @@ export function clearTmp() {
   }
 }
 
-const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';
+export const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0';
 
 /**
  * Sanitize URL to handle potential markdown links or extra whitespace.
  */
-function cleanUrl(rawUrl) {
+export function cleanUrl(rawUrl) {
   if (!rawUrl) return '';
   let url = rawUrl.trim();
 
@@ -392,7 +392,7 @@ function buildYtdlpOptions({ output, format, quality, audioLanguage, isLive, isP
   };
 }
 
-function createYtdlpExec() {
+export function createYtdlpExec() {
   const binDir = join(__dirname, '../../bin');
   const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
   const localBin = join(binDir, binName);
@@ -419,7 +419,7 @@ function cleanYtdlpError(err) {
 /**
  * Run a yt-dlp subprocess with abort + progress wiring and return its stdout text.
  */
-function runYtdlpExec(clean, options, { url, abortSignal, onProgress }) {
+export function runYtdlpExec(clean, options, { url, abortSignal, onProgress }) {
   const youtubedl = createYtdlpExec();
   console.log(`🚀 yt-dlp starting: ${clean}`);
   const subprocess = youtubedl.exec(clean, options);
@@ -459,7 +459,7 @@ function runYtdlpExec(clean, options, { url, abortSignal, onProgress }) {
 }
 
 /** Parse all JSON objects embedded in yt-dlp stdout lines (--print-json emits one per entry). */
-function parseJsonEntries(stdoutText) {
+export function parseJsonEntries(stdoutText) {
   const entries = [];
   for (const line of String(stdoutText || '').split('\n')) {
     const trimmed = line.trim();

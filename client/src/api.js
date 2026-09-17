@@ -97,5 +97,18 @@ export const api = {
      * Returns the EventSource object. Caller is responsible for closing it.
      */
     openProgressStream: () => new EventSource(`${BASE}/bastyon/progress`, { withCredentials: true }),
+
+    // ------------------------------------------------------------------------
+    // Bastyon Auto-Upload watchers (channel / playlist monitors)
+    // ------------------------------------------------------------------------
+    watchers: {
+      list: () => request('GET', '/bastyon/watchers'),
+      get: (id) => request('GET', `/bastyon/watchers/${id}`),
+      create: (data) => request('POST', '/bastyon/watchers', data),
+      update: (id, data) => request('PUT', `/bastyon/watchers/${id}`, data),
+      remove: (id) => request('DELETE', `/bastyon/watchers/${id}`),
+      checkNow: (id) => request('POST', `/bastyon/watchers/${id}/check`),
+      reset: (id) => request('POST', `/bastyon/watchers/${id}/reset`),
+    },
   },
 };

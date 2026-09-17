@@ -12,6 +12,7 @@ import { renderLogin } from './views/login.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderSettings } from './views/settings.js';
 import { renderBastyon } from './views/bastyon.js';
+import { renderBastyonAuto } from './views/bastyon-auto.js';
 
 let currentUser = null;
 
@@ -34,6 +35,10 @@ function navigate(view) {
   }
   if (view === 'bastyon') {
     renderBastyon(currentUser, navigate);
+    return;
+  }
+  if (view === 'bastyon-auto') {
+    renderBastyonAuto(currentUser, navigate);
     return;
   }
   if (view === 'settings') {

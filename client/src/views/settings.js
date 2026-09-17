@@ -18,6 +18,9 @@ export function renderSettings(username, onNavigate) {
           <button class="nav-item" id="nav-bastyon">
             <span class="nav-icon">📤</span> Bastyon Uploader
           </button>
+          <button class="nav-item" id="nav-bastyon-auto">
+            <span class="nav-icon">🤖</span> Bastyon Auto
+          </button>
           <button class="nav-item active" id="nav-settings">
             <span class="nav-icon">⚙️</span> Settings
           </button>
@@ -159,6 +162,7 @@ export function renderSettings(username, onNavigate) {
   // Navigation
   document.getElementById('nav-dashboard').addEventListener('click', () => onNavigate('dashboard'));
   document.getElementById('nav-bastyon').addEventListener('click', () => onNavigate('bastyon'));
+  document.getElementById('nav-bastyon-auto').addEventListener('click', () => onNavigate('bastyon-auto'));
   document.getElementById('logout-btn').addEventListener('click', async () => {
     await api.logout();
     onNavigate('logout');

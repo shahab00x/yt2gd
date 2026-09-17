@@ -9,6 +9,8 @@ import authRoutes from './routes/auth.js';
 import transferRoutes from './routes/transfer.js';
 import systemRoutes from './routes/system.js';
 import bastyonRoutes from './routes/bastyon.js';
+import bastyonWatchersRoutes from './routes/bastyon-watchers.js';
+import { startWatcherScheduler } from './services/bastyon/scheduler.js';
 
 import { exec } from 'child_process';
 
@@ -39,6 +41,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/transfer', transferRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/bastyon', bastyonRoutes);
+app.use('/api/bastyon/watchers', bastyonWatchersRoutes);
 
 // Serve the Vite production build (when running in production)
 const clientDistPath = join(__dirname, '../client/dist');
@@ -61,6 +64,9 @@ app.use((err, req, res, next) => {
 
 // Clear tmp directory on startup
 clearTmp();
+
+// Start the Bastyon Auto-Upload scheduler (channel/playlist watchers)
+startWatcherScheduler();
 
 // Schedule daily automatic yt-dlp update (every 24 hours)
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000;
