@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { existsSync } from 'fs';
 import { unlink, rm } from 'fs/promises';
-import { basename } from 'path';
+import { basename, join } from 'path';
 import { requireAuth } from './auth.js';
 import { downloadFile, zipDirectory, TMP_DIR } from '../services/downloader.js';
 import { uploadToGDrive, uploadFolderToGDrive, getTodayFolderName } from '../services/gdrive.js';
