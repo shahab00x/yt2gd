@@ -24,6 +24,7 @@ import * as vault from './vault.js';
 import * as accounts from './accounts.js';
 import * as drafts from './drafts.js';
 import * as watchers from './watchers.js';
+import { MAX_TAGS } from './watchers.js';
 import { fetchSourceEntries, diffNewEntries, sortOldestFirst } from './monitor.js';
 import { publishDraftById } from './publisher.js';
 
@@ -40,9 +41,27 @@ function resolveCookiesPath() {
   return cookiesPath;
 }
 
+/**
+ * Merge watcher default tags with a video's own tags: defaults FIRST, then
+ * video tags, deduped case-insensitively (first spelling wins), total capped
+ * at MAX_TAGS (platform post limit — excess video tags are dropped).
+ */
+export function mergeTags(defaultTags, videoTags) {
+  const out = [];
+  const seen = new Set();
+  for (const t of [...(defaultTags || []), ...(videoTags || [])]) {
+    if (typeof t !== 'string') continue;
+    const clean = t.trim();
+    if (!clean || seen.has(clean.toLowerCase())) continue;
+    seen.add(clean.toLowerCase());
+    out.push(clean);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
 /** Append a "link to the original" footer (idempotent). */
-export function appendOriginalLink(description, originalUrl) {
-  const desc = String(description || '');
+export function appendOriginalLink(description, originalUrl) {  const desc = String(description || '');
   const url = String(originalUrl || '');
   if (!url) return desc;
   if (desc.includes(url)) return desc;
@@ -210,7 +229,7 @@ export async function runWatcherCheck(watcherId, {
           fileSize,
           title: meta.title,
           description: appendOriginalLink(meta.description, meta.originalUrl),
-          tags: meta.tags,
+          tags: mergeTags(current.defaultTags, meta.tags),
           thumbnailUrl: meta.thumbnail,
           sourceUrl: meta.originalUrl,
           error: '',

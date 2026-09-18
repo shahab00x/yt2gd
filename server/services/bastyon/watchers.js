@@ -47,6 +47,9 @@ export const WATCHER_TYPES = ['channel', 'playlist'];
 const MAX_SEEN_IDS = 2000;
 const MAX_LOG_ENTRIES = 200;
 const MAX_RECENT_ERRORS = 20;
+/** Platform post tag limit — applies to default tags and the merged total. */
+export const MAX_TAGS = 15;
+export const MAX_TAG_LENGTH = 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export class WatcherValidationError extends Error {
@@ -183,7 +186,35 @@ export function validateWatcherInput(data, { partial = false } = {}) {
 
   if (input.enabled !== undefined) out.enabled = Boolean(input.enabled);
 
+  if (input.defaultTags !== undefined) out.defaultTags = normalizeTags(input.defaultTags);
+
   return out;
+}
+
+/**
+ * Normalize a tags input (array or comma-separated string, mirroring the
+ * drafts PUT convention) into a clean string array. Throws
+ * WatcherValidationError on non-string entries, over-long tags, or more
+ * than MAX_TAGS entries.
+ */
+export function normalizeTags(input) {
+  const raw = Array.isArray(input) ? input : String(input ?? '').split(',');
+  const tags = [];
+  for (const t of raw) {
+    if (typeof t !== 'string') {
+      throw new WatcherValidationError('Tags must be strings (or a comma-separated string).');
+    }
+    const clean = t.trim();
+    if (!clean) continue;
+    if (clean.length > MAX_TAG_LENGTH) {
+      throw new WatcherValidationError(`Tag "${clean.slice(0, 30)}…" exceeds ${MAX_TAG_LENGTH} characters.`);
+    }
+    tags.push(clean);
+  }
+  if (tags.length > MAX_TAGS) {
+    throw new WatcherValidationError(`At most ${MAX_TAGS} default tags are allowed (platform post limit).`);
+  }
+  return tags;
 }
 
 /** Public summary for list views (omits the potentially large seenVideoIds). */
@@ -201,6 +232,7 @@ export function toSummary(w) {
     checkIntervalMinutes: w.checkIntervalMinutes,
     dailyLimit: w.dailyLimit,
     enabled: w.enabled,
+    defaultTags: w.defaultTags || [],
     seeded: w.seeded,
     seenCount: (w.seenVideoIds || []).length,
     uploadsToday: uploadsInLast24h(w),
@@ -240,6 +272,7 @@ export function createWatcher(data) {
     checkIntervalMinutes: clean.checkIntervalMinutes ?? WATCHER_DEFAULTS.checkIntervalMinutes,
     dailyLimit: clean.dailyLimit ?? WATCHER_DEFAULTS.dailyLimit,
     enabled: clean.enabled ?? WATCHER_DEFAULTS.enabled,
+    defaultTags: clean.defaultTags || [],
     seeded: false,
     seenVideoIds: [],
     uploadLog: [],

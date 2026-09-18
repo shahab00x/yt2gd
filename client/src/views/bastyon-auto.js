@@ -159,6 +159,11 @@ export function renderBastyonAuto(username, onNavigate) {
               <label for="watcher-limit">Max uploads per 24h (1–50)</label>
               <input id="watcher-limit" class="form-control" type="number" min="1" max="50" value="5" />
             </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="watcher-tags">Default tags (comma separated)</label>
+              <input id="watcher-tags" class="form-control" type="text" placeholder="crypto, vlog, tech" />
+              <p class="hint" style="margin:4px 0 0;">Always added <strong>first</strong>, in addition to the video's own tags. Max 15 tags total per post.</p>
+            </div>
           </div>
           <p class="hint" id="watcher-mode-hint">Channel mode: uploads videos posted <strong>after creation</strong> — the archive is never backfilled. Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original. Videos that can't download yet (e.g. still live) retry automatically.</p>
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;">
@@ -247,6 +252,10 @@ export function renderBastyonAuto(username, onNavigate) {
     }
     container.innerHTML = state.watchers.map((w) => {
       const checking = !!state.checking[w.id];
+      const defTags = w.defaultTags || [];
+      const tagsLabel = defTags.length
+        ? esc(defTags.slice(0, 5).join(', ')) + (defTags.length > 5 ? esc(` +${defTags.length - 5} more`) : '')
+        : 'none';
       const errors = (w.recentErrors || []).slice(0, 3).map((e) => `
         <div class="file-meta" style="color:var(--error);">❌ ${esc(e.videoId || '')}: ${esc((e.error || '').slice(0, 160))}</div>
       `).join('');
@@ -267,7 +276,7 @@ export function renderBastyonAuto(username, onNavigate) {
           👤 ${esc(w.accountName || '—')} · 🎞 ${esc(w.quality)} ${esc(w.format)} · 🔁 every ${esc(w.checkIntervalMinutes)} min · 📤 today ${esc(w.uploadsToday)}/${esc(w.dailyLimit)} · 🕒 checked ${esc(timeAgo(w.lastCheckAt))}
         </div>
         <div class="file-meta">
-          📦 ${esc(w.seenCount || 0)} older video${(w.seenCount || 0) === 1 ? '' : 's'} skipped · Watching since ${esc(w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '—')}
+          📦 ${esc(w.seenCount || 0)} older video${(w.seenCount || 0) === 1 ? '' : 's'} skipped · Watching since ${esc(w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '—')} · 🏷 ${tagsLabel}
         </div>
         ${w.lastError ? `<div class="file-meta" style="color:var(--warning);">⚠️ ${esc(w.lastError.slice(0, 200))}</div>` : ''}
         ${errors}
@@ -363,6 +372,7 @@ export function renderBastyonAuto(username, onNavigate) {
       audioLanguage: document.getElementById('watcher-audio').value,
       checkIntervalMinutes: Number(document.getElementById('watcher-interval').value),
       dailyLimit: Number(document.getElementById('watcher-limit').value),
+      defaultTags: document.getElementById('watcher-tags').value,
     };
   }
 
@@ -412,6 +422,7 @@ export function renderBastyonAuto(username, onNavigate) {
     document.getElementById('watcher-audio').value = w.audioLanguage || 'original';
     document.getElementById('watcher-interval').value = w.checkIntervalMinutes ?? 15;
     document.getElementById('watcher-limit').value = w.dailyLimit ?? 5;
+    document.getElementById('watcher-tags').value = (w.defaultTags || []).join(', ');
     document.getElementById('watcher-cancel-btn').style.display = '';
     document.getElementById('watcher-form-msg').style.display = 'none';
     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
@@ -430,6 +441,7 @@ export function renderBastyonAuto(username, onNavigate) {
     document.getElementById('watcher-audio').value = 'original';
     document.getElementById('watcher-interval').value = 15;
     document.getElementById('watcher-limit').value = 5;
+    document.getElementById('watcher-tags').value = '';
     document.getElementById('watcher-cancel-btn').style.display = 'none';
     if (!keepMsg) document.getElementById('watcher-form-msg').style.display = 'none';
   }
