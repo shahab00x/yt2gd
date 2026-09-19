@@ -154,9 +154,12 @@ export async function runWatcherCheck(watcherId, {
   activeRuns.add(watcherId);
   const abortController = new AbortController();
   try {
-    // 0. Vault must be unlocked (keys are RAM-only by design).
+    // 0. Vault must be unlocked (keys are RAM-only by design). Skipped-locked
+    //    checks deliberately do NOT consume the check interval, so the status
+    //    flips back to healthy within ~a tick of unlocking instead of going
+    //    stale for a full interval.
     if (!vault.isUnlocked()) {
-      watchers.recordCheck(watcherId, 'skipped_locked', 'Vault is locked. Unlock it in Bastyon Uploader to resume auto-uploads.');
+      watchers.recordCheck(watcherId, 'skipped_locked', 'Vault is locked. Unlock it in Bastyon Uploader to resume auto-uploads.', { bumpCheck: false });
       console.log(`[Bastyon Auto] Watcher "${watcher.name}" skipped — vault locked.`);
       return { skipped: true, reason: 'vault_locked' };
     }
@@ -228,27 +231,35 @@ export async function runWatcherCheck(watcherId, {
       return result;
     }
 
-    // 6. Publish-date cutoff: flat listings can't date entries, so look up
-    //    each candidate's upload_date and skip anything published before the
-    //    watcher-creation day. Date-skipped videos are marked seen
-    //    (evaluated-terminal — they can never qualify, so no retry spam).
-    //    Date-lookup failures fail open to today's behavior.
-    const cutoffDay = yyyymmdd(watcher.createdAt);
-    const eligible = [];
-    for (const entry of fresh) {
-      let uploadDate = null;
-      try {
-        uploadDate = await fetchDate(entry.url, { abortSignal: abortController.signal });
-      } catch {
-        uploadDate = null;
+    // 6. Publish-date cutoff (CHANNELS ONLY): flat listings can't date
+    //    entries, so look up each candidate's upload_date and skip anything
+    //    published before the watcher-creation day. Date-skipped videos are
+    //    marked seen (evaluated-terminal — they can never qualify, so no
+    //    retry spam). Date-lookup failures fail open to today's behavior.
+    //    Playlists are EXEMPT by design: the curator's additions define
+    //    newness, so any added video uploads regardless of publish age.
+    //    (Probed yt-dlp 2026.08.19 YoutubeTabIE: flat entries carry no
+    //    playlist-added timestamp — only null `timestamp`/`release_timestamp`
+    //    — so there is no added-date to compare even if we wanted one.)
+    let eligible = fresh;
+    if (watcher.type === 'channel') {
+      const cutoffDay = yyyymmdd(watcher.createdAt);
+      eligible = [];
+      for (const entry of fresh) {
+        let uploadDate = null;
+        try {
+          uploadDate = await fetchDate(entry.url, { abortSignal: abortController.signal });
+        } catch {
+          uploadDate = null;
+        }
+        if (uploadDate && uploadDate < cutoffDay) {
+          watchers.markSeen(watcherId, [entry.videoId]);
+          result.dateSkipped += 1;
+          console.log(`[Bastyon Auto] Skipping "${entry.title}" (${entry.videoId}): published ${uploadDate}, before watcher creation.`);
+          continue;
+        }
+        eligible.push(entry);
       }
-      if (uploadDate && uploadDate < cutoffDay) {
-        watchers.markSeen(watcherId, [entry.videoId]);
-        result.dateSkipped += 1;
-        console.log(`[Bastyon Auto] Skipping "${entry.title}" (${entry.videoId}): published ${uploadDate}, before watcher creation.`);
-        continue;
-      }
-      eligible.push(entry);
     }
     result.new = eligible.length;
     if (!eligible.length) {

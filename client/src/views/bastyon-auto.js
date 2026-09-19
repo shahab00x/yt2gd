@@ -179,6 +179,7 @@ export function renderBastyonAuto(username, onNavigate) {
           <ul style="color:var(--text-secondary); font-size:0.9rem; line-height:1.7; margin:0; padding-left:20px;">
             <li>Every minute the server checks watchers whose interval has elapsed (one at a time).</li>
             <li>Pointing a watcher at a channel with hundreds of videos is safe: existing videos are remembered and <strong>skipped</strong> — only videos posted after creation upload, oldest first, up to the daily limit.</li>
+            <li>Channel watchers additionally skip anything published before creation (per-video date check). Playlist watchers have no date rule: anything you add uploads.</li>
             <li>Suspiciously thin polls (throttled/truncated listings) abort the check instead of uploading, and per-video publish dates backstop the creation-date rule.</li>
             <li>Channels: currently-live and upcoming streams are skipped; finished livestreams upload like normal videos. A stream that is still live when checked is retried on later checks.</li>
             <li>Failures after a successful download stay as <strong>failed drafts in Bastyon Uploader → Drafts</strong> where you can retry manually — details appear under the watcher.</li>
@@ -239,7 +240,7 @@ export function renderBastyonAuto(username, onNavigate) {
     } else {
       banner.innerHTML = `
         <div class="alert alert-error fade-up" style="display:flex; margin-bottom:20px;">
-          🔒 Vault locked — auto-upload checks are paused until you unlock it in Bastyon Uploader (needed after every server restart).
+          🔒 Vault locked — auto-upload checks are paused until you unlock it in Bastyon Uploader (needed after every server restart). Checks resume automatically within a minute of unlocking.
         </div>`;
     }
   }
@@ -322,6 +323,11 @@ export function renderBastyonAuto(username, onNavigate) {
       try {
         await api.bastyon.watchers.update(id, { enabled: !w.enabled });
         await loadWatchers();
+        if (!w.enabled) {
+          // Just enabled: run one check immediately so the card reflects the
+          // live state instead of waiting for the next interval.
+          await handleWatcherAction('check', id);
+        }
       } catch (e) { alert(`❌ ${e.message}`); }
       return;
     }
@@ -350,7 +356,7 @@ export function renderBastyonAuto(username, onNavigate) {
   // ---------------- Form ----------------
   const MODE_HINTS = {
     channel: 'Channel mode: uploads videos posted <strong>after creation</strong> — the archive is never backfilled. Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original. Videos that can\'t download yet (e.g. still live) retry automatically.',
-    playlist: 'Playlist mode: uploads <strong>newly added</strong> videos — existing items are remembered and skipped. Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original.',
+    playlist: 'Playlist mode: uploads <strong>newly added</strong> videos — existing items are remembered and skipped. Any video you add uploads, however old it is (playlists ignore video age). Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original.',
   };
   document.getElementById('watcher-type').addEventListener('change', (e) => {
     const isPlaylist = e.target.value === 'playlist';

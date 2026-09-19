@@ -306,6 +306,31 @@ export function isPlaylistUrl(url) {
 }
 
 /**
+ * Extract hashtags from a video title + description (some uploads carry
+ * their tags as `#tag` text instead of proper tag metadata). A hashtag
+ * counts when it starts the text or follows whitespace/an opening
+ * bracket — mid-word hashes and URL fragments (`…#t=120`) are ignored.
+ * Unicode-aware; de-duplicated case-insensitively (first spelling wins),
+ * order of appearance.
+ */
+export function extractHashtags(title, description) {
+  const out = [];
+  const seen = new Set();
+  const text = `${String(title || '')}\n${String(description || '')}`;
+  const re = /(?:^|[\s([])#([\p{L}\p{N}_]+)/gu;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const tag = m[1];
+    const key = tag.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(tag);
+    }
+  }
+  return out;
+}
+
+/**
  * Audio track options for the auto-dub fix (mirrors the tinnitus-sound-therapy app).
  * 'original' relies on the `formatSort: ['lang', 'quality']` sort key, which ranks
  * the original-language stream above YouTube's auto-dubbed/region-selected tracks.
@@ -961,6 +986,15 @@ export async function downloadWithMetadata(url, { format = 'video', quality = 'b
   }
 
   const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : [];
+  // Some uploads carry tags as #hashtags in the title/description instead of
+  // proper tag metadata — include those too (deduped, proper tags first).
+  const seenTags = new Set(tags.map((t) => t.toLowerCase()));
+  for (const h of extractHashtags(metadata.title, metadata.description)) {
+    if (!seenTags.has(h.toLowerCase())) {
+      seenTags.add(h.toLowerCase());
+      tags.push(h);
+    }
+  }
   return {
     filePath,
     title: String(metadata.title || ''),

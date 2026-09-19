@@ -383,14 +383,21 @@ export function isDue(watcher, now = Date.now()) {
   return now - (watcher.lastCheckAt || 0) >= intervalMs;
 }
 
-/** Record a check outcome (always bumps lastCheckAt). */
-export function recordCheck(id, status, error = '') {
+/**
+ * Record a check outcome. Always bumps lastCheckAt unless { bumpCheck: false }
+ * (used for vault-locked skips so recovery checks stay due and flip to
+ * healthy within ~a tick of unlocking). Skips the write entirely when
+ * nothing changed, to avoid store churn on repeated identical skips.
+ */
+export function recordCheck(id, status, error = '', { bumpCheck = true } = {}) {
   const store = loadWatchers();
   const watcher = store.watchers.find((w) => w.id === id);
   if (!watcher) return null;
-  watcher.lastCheckAt = Date.now();
+  const errText = String(error || '');
+  if (!bumpCheck && watcher.lastStatus === status && watcher.lastError === errText) return watcher;
+  if (bumpCheck) watcher.lastCheckAt = Date.now();
   watcher.lastStatus = status;
-  watcher.lastError = String(error || '');
+  watcher.lastError = errText;
   watcher.updatedAt = Date.now();
   saveWatchers(store);
   return watcher;
