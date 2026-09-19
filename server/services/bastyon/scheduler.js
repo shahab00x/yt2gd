@@ -5,8 +5,14 @@
  * Guarantees:
  * - Serial execution: watchers run one at a time; a watcher never runs twice
  *   concurrently (per-watcher in-flight guard + global tick guard).
+ * - Stable sources: bare channel URLs self-heal to the /videos tab (the home
+ *   tab's rotating rails would otherwise surface old videos as "new").
  * - No duplicates: every evaluated video id is remembered in `seenVideoIds`;
  *   successes are additionally logged with txid.
+ * - Unstable polls are refused: listings far smaller than history abort the
+ *   check instead of driving uploads or marks.
+ * - Creation-date rule: candidates published before watcher creation are
+ *   skipped (and marked seen) via a per-video upload_date lookup.
  * - Per-watcher rolling 24h cap (`dailyLimit`, default 5).
  * - Oldest-first ordering within a check (by YouTube publish timestamp).
  * - Vault-lock aware: checks are skipped (never crash) while the vault is
@@ -25,7 +31,7 @@ import * as accounts from './accounts.js';
 import * as drafts from './drafts.js';
 import * as watchers from './watchers.js';
 import { MAX_TAGS } from './watchers.js';
-import { fetchSourceEntries, diffNewEntries, sortOldestFirst } from './monitor.js';
+import { fetchSourceListing, fetchUploadDate, diffNewEntries, sortOldestFirst } from './monitor.js';
 import { publishDraftById } from './publisher.js';
 
 const TICK_MS = 60 * 1000;
@@ -58,6 +64,14 @@ export function mergeTags(defaultTags, videoTags) {
     if (out.length >= MAX_TAGS) break;
   }
   return out;
+}
+
+/** Local YYYYMMDD for a timestamp (used for the creation-date cutoff). */
+function yyyymmdd(ts) {
+  const d = new Date(ts || Date.now());
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}${m}${day}`;
 }
 
 /** Append a "link to the original" footer (idempotent). */
@@ -107,17 +121,19 @@ export function stopWatcherScheduler() {
 }
 
 /**
- * Run a single watcher check: poll source → diff → download + publish new
- * videos (oldest-first, within the daily quota).
+ * Run a single watcher check: normalize source → poll → stability guard →
+ * seed-or-diff → publish-date cutoff → download + publish new videos
+ * (oldest-first, within the daily quota).
  *
  * The pipeline steps are injectable for tests:
- * `{ fetchEntries, downloadVideo, publishVideo }` default to the real
- * implementations (monitor.fetchSourceEntries, downloadWithMetadata,
- * publishDraftById).
+ * `{ fetchListing, fetchDate, downloadVideo, publishVideo }` default to the
+ * real implementations (monitor.fetchSourceListing, monitor.fetchUploadDate,
+ * downloadWithMetadata, publishDraftById).
  */
 export async function runWatcherCheck(watcherId, {
   reason = 'manual',
-  fetchEntries = fetchSourceEntries,
+  fetchListing = fetchSourceListing,
+  fetchDate = fetchUploadDate,
   downloadVideo = downloadWithMetadata,
   publishVideo = publishDraftById,
 } = {}) {
@@ -152,26 +168,53 @@ export async function runWatcherCheck(watcherId, {
       return { checked: 0, new: 0, uploaded: [], failed: [{ error: msg }], skippedOverLimit: 0 };
     }
 
-    // 1. Poll the source (metadata only).
-    let entries;
-    try {
-      entries = await fetchEntries(watcher.sourceUrl, { abortSignal: abortController.signal });
-    } catch (e) {
-      watchers.recordCheck(watcherId, 'error', e.message);
-      return { checked: 0, new: 0, uploaded: [], failed: [{ error: e.message }], skippedOverLimit: 0 };
+    // 1. Self-heal bare channel URLs to the stable /videos tab (a bare
+    //    @handle reads the rotating home tab whose video set changes over
+    //    time and surfaces old videos as "new"). Persisted once changed.
+    const normalizedUrl = watchers.normalizeSourceUrl(watcher.type, watcher.sourceUrl);
+    if (normalizedUrl && normalizedUrl !== watcher.sourceUrl) {
+      watchers.updateWatcher(watcherId, { sourceUrl: normalizedUrl });
+      watcher = watchers.getWatcher(watcherId);
+      if (!watcher) throw Object.assign(new Error('Watcher was deleted during the check.'), { statusCode: 404 });
+      console.log(`[Bastyon Auto] Normalized source URL for "${watcher.name}" → ${normalizedUrl}`);
     }
 
-    // 2. First run seeds known ids without uploading.
+    // 2. Poll the source (metadata only).
+    let entries;
+    let filteredLiveIds = [];
+    try {
+      const listing = await fetchListing(watcher.sourceUrl, { abortSignal: abortController.signal });
+      entries = listing.entries;
+      filteredLiveIds = listing.filteredLiveIds || [];
+    } catch (e) {
+      watchers.recordCheck(watcherId, 'error', e.message);
+      return { checked: 0, new: 0, uploaded: [], failed: [{ error: e.message }], skippedOverLimit: 0, dateSkipped: 0 };
+    }
+    watchers.updatePollStats(watcherId, entries.length);
+
+    // 3. Stability guard: a throttled/truncated tab extraction that exits 0
+    //    must never drive uploads or marks — abort loudly instead.
+    watcher = watchers.getWatcher(watcherId);
+    if (!watcher) throw Object.assign(new Error('Watcher was deleted during the check.'), { statusCode: 404 });
+    if (watchers.isSuspiciouslySmall(watcher, entries.length)) {
+      const msg = `Suspiciously small listing (${entries.length} videos vs usual ~${watcher.maxEntriesSeen}) — possible throttled/truncated poll. Skipping check; nothing uploaded or marked.`;
+      watchers.recordCheck(watcherId, 'error', msg);
+      console.warn(`[Bastyon Auto] Watcher "${watcher.name}": ${msg}`);
+      return { checked: entries.length, new: 0, uploaded: [], failed: [], skippedOverLimit: 0, dateSkipped: 0, abortedUnstable: true };
+    }
+
+    // 4. First run seeds known ids without uploading — including ids that
+    //    were live/upcoming at creation (they'd otherwise re-upload later).
     watcher = watchers.getWatcher(watcherId);
     if (!watcher) throw Object.assign(new Error('Watcher was deleted during the check.'), { statusCode: 404 });
     if (!watcher.seeded) {
-      watchers.markSeeded(watcherId, entries.map((e) => e.videoId));
+      watchers.markSeeded(watcherId, [...entries.map((e) => e.videoId), ...filteredLiveIds]);
       watchers.recordCheck(watcherId, 'ok', '');
       console.log(`[Bastyon Auto] Watcher "${watcher.name}" seeded with ${entries.length} existing video(s). Future videos will upload.`);
-      return { seeded: true, discovered: entries.length, checked: entries.length, new: 0, uploaded: [], failed: [], skippedOverLimit: 0 };
+      return { seeded: true, discovered: entries.length, checked: entries.length, new: 0, uploaded: [], failed: [], skippedOverLimit: 0, dateSkipped: 0 };
     }
 
-    // 3. Diff + oldest-first. Timestamped entries sort ascending; flat
+    // 5. Diff + oldest-first. Timestamped entries sort ascending; flat
     //    channel tabs arrive newest-first WITHOUT timestamps, so reverse
     //    those to honor oldest-first. (Playlist order is curator-defined and
     //    kept as-is — for append-only playlists that is oldest-added first.)
@@ -179,13 +222,42 @@ export async function runWatcherCheck(watcherId, {
     if (watcher.type === 'channel' && fresh.length > 1 && fresh.every((e) => !e.timestamp)) {
       fresh = [...fresh].reverse();
     }
-    const result = { checked: entries.length, new: fresh.length, uploaded: [], failed: [], skippedOverLimit: 0 };
+    const result = { checked: entries.length, new: fresh.length, uploaded: [], failed: [], skippedOverLimit: 0, dateSkipped: 0 };
     if (!fresh.length) {
       watchers.recordCheck(watcherId, 'ok', '');
       return result;
     }
 
-    // 4. Process each new video within the rolling 24h quota.
+    // 6. Publish-date cutoff: flat listings can't date entries, so look up
+    //    each candidate's upload_date and skip anything published before the
+    //    watcher-creation day. Date-skipped videos are marked seen
+    //    (evaluated-terminal — they can never qualify, so no retry spam).
+    //    Date-lookup failures fail open to today's behavior.
+    const cutoffDay = yyyymmdd(watcher.createdAt);
+    const eligible = [];
+    for (const entry of fresh) {
+      let uploadDate = null;
+      try {
+        uploadDate = await fetchDate(entry.url, { abortSignal: abortController.signal });
+      } catch {
+        uploadDate = null;
+      }
+      if (uploadDate && uploadDate < cutoffDay) {
+        watchers.markSeen(watcherId, [entry.videoId]);
+        result.dateSkipped += 1;
+        console.log(`[Bastyon Auto] Skipping "${entry.title}" (${entry.videoId}): published ${uploadDate}, before watcher creation.`);
+        continue;
+      }
+      eligible.push(entry);
+    }
+    result.new = eligible.length;
+    if (!eligible.length) {
+      watchers.recordCheck(watcherId, 'ok', result.dateSkipped ? `${result.dateSkipped} old video(s) skipped by creation-date rule.` : '');
+      return result;
+    }
+    fresh = eligible;
+
+    // 7. Process each new video within the rolling 24h quota.
     const cookiesPath = resolveCookiesPath();
     for (const entry of fresh) {
       const current = watchers.getWatcher(watcherId);

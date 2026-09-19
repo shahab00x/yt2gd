@@ -20,10 +20,12 @@ import {
 } from '../downloader.js';
 
 /**
- * Fetch the current entries of a channel or playlist URL.
- * Returns normalized [{ videoId, url, title, liveStatus, timestamp }].
+ * Fetch the current listing of a channel or playlist URL.
+ * Returns { entries, filteredLiveIds }: normalized video entries plus the
+ * ids dropped SOLELY by the live/upcoming filter (used to seed them at
+ * watcher-creation time so long-scheduled streams don't re-upload later).
  */
-export async function fetchSourceEntries(sourceUrl, { abortSignal = null } = {}) {
+export async function fetchSourceListing(sourceUrl, { abortSignal = null } = {}) {
   const clean = cleanUrl(sourceUrl);
   if (!clean) throw new Error('Source URL is empty.');
 
@@ -53,7 +55,69 @@ export async function fetchSourceEntries(sourceUrl, { abortSignal = null } = {})
 
   const root = parseSingleJson(stdoutText);
   const rawEntries = root && Array.isArray(root.entries) ? root.entries : [];
-  return rawEntries.map(normalizeEntry).filter(Boolean);
+  const entries = [];
+  const filteredLiveIds = [];
+  for (const raw of rawEntries) {
+    const normalized = normalizeEntry(raw);
+    if (normalized) {
+      entries.push(normalized);
+    } else if (isLiveFiltered(raw)) {
+      const id = typeof raw?.id === 'string' && raw.id ? raw.id : null;
+      if (id) filteredLiveIds.push(id);
+    }
+  }
+  return { entries, filteredLiveIds };
+}
+
+/** True when a raw entry is dropped ONLY by the live/upcoming filter. */
+function isLiveFiltered(e) {
+  if (!e || typeof e !== 'object') return false;
+  if (typeof e.id !== 'string' || !e.id) return false;
+  if (e.is_live === true) return true;
+  return e.live_status === 'is_live' || e.live_status === 'is_upcoming';
+}
+
+/**
+ * Fetch the current entries of a channel or playlist URL.
+ * Returns normalized [{ videoId, url, title, liveStatus, timestamp }].
+ */
+export async function fetchSourceEntries(sourceUrl, { abortSignal = null } = {}) {
+  const { entries } = await fetchSourceListing(sourceUrl, { abortSignal });
+  return entries;
+}
+
+/**
+ * Fetch a single video's publish date (YYYYMMDD) via a cheap metadata-only
+ * lookup. Returns the date string, or null when unavailable. Used to enforce
+ * the "only videos posted after watcher creation upload" rule for candidates
+ * that flat listings can't date (timestamps are null in flat mode).
+ */
+export async function fetchUploadDate(videoUrl, { abortSignal = null } = {}) {
+  const clean = cleanUrl(videoUrl);
+  if (!clean) return null;
+
+  const settings = loadSettings();
+  let cookiesPath = settings.cookiesPath && existsSync(settings.cookiesPath) ? settings.cookiesPath : null;
+  if (cookiesPath) cookiesPath = filterCookies(cookiesPath);
+
+  const options = {
+    skipDownload: true,
+    noPlaylist: true,
+    print: 'upload_date',
+    noCheckCertificates: true,
+    socketTimeout: 60,
+    userAgent: DEFAULT_UA,
+    noWarnings: true,
+    ...(cookiesPath && existsSync(cookiesPath) ? { cookies: cookiesPath } : {}),
+  };
+
+  try {
+    const stdoutText = await runYtdlpExec(clean, options, { url: clean, abortSignal, onProgress: null });
+    const match = String(stdoutText || '').match(/(\d{8})/);
+    return match ? match[1] : null;
+  } catch {
+    return null; // best-effort: callers fail open to today's behavior
+  }
 }
 
 /** yt-dlp --dump-single-json prints ONE big JSON object (not JSON lines). */
@@ -126,4 +190,4 @@ function cleanYtdlpError(err) {
 }
 
 // Re-exported for unit tests (avoids importing youtube-dl-exec paths elsewhere).
-export const __testables = { normalizeEntry, parseSingleJson };
+export const __testables = { normalizeEntry, parseSingleJson, isLiveFiltered };

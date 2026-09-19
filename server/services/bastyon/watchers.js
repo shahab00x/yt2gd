@@ -44,6 +44,12 @@ export const FORMATS = ['video', 'audio'];
 export const QUALITIES = ['best', '1080', '720', '480', '360', 'worst'];
 export const WATCHER_TYPES = ['channel', 'playlist'];
 
+/** Stable per-tab video listings (a bare channel URL reads the unstable home tab). */
+export const CHANNEL_VIDEO_TABS = ['videos', 'shorts', 'streams', 'live'];
+
+/** Thin-poll guard: abort checks returning less than this ratio of the historical max (with a floor). */
+export const POLL_GUARD = { minHistory: 20, minRatio: 0.5 };
+
 const MAX_SEEN_IDS = 2000;
 const MAX_LOG_ENTRIES = 200;
 const MAX_RECENT_ERRORS = 20;
@@ -85,6 +91,39 @@ function saveWatchers(data) {
 function isYouTubeHost(hostname) {
   const h = String(hostname || '').toLowerCase();
   return h === 'youtube.com' || h.endsWith('.youtube.com') || h === 'youtu.be';
+}
+
+/**
+ * Normalize a channel source URL to a stable listing tab. A bare channel URL
+ * (`/@handle`, `/channel/…`, `/c/…`, `/user/…`) makes yt-dlp read the
+ * channel HOME tab — a rotating mix of latest/popular/featured rails whose
+ * video set changes over time and surfaces old videos as "new". Appending
+ * `/videos` gives a stable reverse-chronological listing. Explicit
+ * `/videos|/shorts|/streams|/live` tabs are left untouched; non-channel
+ * types and unrecognized shapes pass through unchanged.
+ */
+export function normalizeSourceUrl(type, sourceUrl) {
+  const url = String(sourceUrl || '').trim();
+  if (type !== 'channel' || !url) return url;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  if (!segs.length) return url;
+  const last = segs[segs.length - 1].toLowerCase();
+  if (CHANNEL_VIDEO_TABS.includes(last)) return url;
+  const first = segs[0].toLowerCase();
+  // Channel roots only: /@handle (any depth without a listing tab),
+  // /channel|/c|/user + id. Everything else (watch pages, feeds, search,
+  // playlists) passes through for yt-dlp to resolve or reject loudly.
+  const isChannelRoot =
+    first.startsWith('@') || (['channel', 'c', 'user'].includes(first) && segs.length >= 2);
+  if (!isChannelRoot) return url;
+  parsed.pathname = `/${segs.join('/')}/videos`;
+  return parsed.toString();
 }
 
 /**
@@ -134,7 +173,7 @@ export function validateWatcherInput(data, { partial = false } = {}) {
     if (type === 'channel' && parsed.pathname.startsWith('/playlist')) {
       throw new WatcherValidationError('Channel watchers need a channel URL (@handle, /channel/…, /c/…, /user/…), not a /playlist URL.');
     }
-    out.sourceUrl = sourceUrl;
+    out.sourceUrl = normalizeSourceUrl(type, sourceUrl);
   }
 
   if (need('accountId')) {
@@ -236,6 +275,8 @@ export function toSummary(w) {
     seeded: w.seeded,
     seenCount: (w.seenVideoIds || []).length,
     uploadsToday: uploadsInLast24h(w),
+    lastEntryCount: w.lastEntryCount || 0,
+    maxEntriesSeen: w.maxEntriesSeen || 0,
     recentErrors: w.recentErrors || [],
     lastCheckAt: w.lastCheckAt || 0,
     lastStatus: w.lastStatus || 'never',
@@ -277,6 +318,8 @@ export function createWatcher(data) {
     seenVideoIds: [],
     uploadLog: [],
     recentErrors: [],
+    lastEntryCount: 0,
+    maxEntriesSeen: 0,
     lastCheckAt: 0,
     lastStatus: 'never',
     lastError: '',
@@ -351,6 +394,33 @@ export function recordCheck(id, status, error = '') {
   watcher.updatedAt = Date.now();
   saveWatchers(store);
   return watcher;
+}
+
+/**
+ * Record a successful poll's entry count and track the historical maximum.
+ * Deliberately kept across history resets (it describes the source, not the
+ * seen state) so a post-reset partial poll can't poison a fresh seed.
+ */
+export function updatePollStats(id, entryCount) {
+  const store = loadWatchers();
+  const watcher = store.watchers.find((w) => w.id === id);
+  if (!watcher) return null;
+  const n = Number(entryCount) || 0;
+  watcher.lastEntryCount = n;
+  watcher.maxEntriesSeen = Math.max(watcher.maxEntriesSeen || 0, n);
+  watcher.updatedAt = Date.now();
+  saveWatchers(store);
+  return watcher;
+}
+
+/**
+ * True when a poll returned suspiciously few entries vs. history — a sign of
+ * a throttled/truncated tab extraction. Guards small sources with a floor:
+ * only applies once the historical max reaches POLL_GUARD.minHistory.
+ */
+export function isSuspiciouslySmall(watcher, entryCount) {
+  const max = watcher?.maxEntriesSeen || 0;
+  return max >= POLL_GUARD.minHistory && (Number(entryCount) || 0) < max * POLL_GUARD.minRatio;
 }
 
 /** First-run seeding: remember current ids WITHOUT uploading. */

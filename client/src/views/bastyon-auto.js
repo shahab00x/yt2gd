@@ -123,7 +123,7 @@ export function renderBastyonAuto(username, onNavigate) {
             <div class="form-group" style="grid-column: 1 / -1;">
               <label for="watcher-url">Source URL</label>
               <input id="watcher-url" class="form-control" type="url" placeholder="https://www.youtube.com/@somechannel/videos  or  …/playlist?list=PL…" />
-              <p class="hint" id="watcher-url-hint">Channel: @handle, /channel/…, /c/… or /user/… URL. Live videos are skipped; finished livestreams are uploaded.</p>
+              <p class="hint" id="watcher-url-hint">Channel: @handle, /channel/…, /c/… or /user/… URL (bare URLs automatically use the Videos tab for a stable listing). Live videos are skipped; finished livestreams are uploaded.</p>
             </div>
             <div class="form-group">
               <label for="watcher-account">Bastyon account</label>
@@ -179,6 +179,7 @@ export function renderBastyonAuto(username, onNavigate) {
           <ul style="color:var(--text-secondary); font-size:0.9rem; line-height:1.7; margin:0; padding-left:20px;">
             <li>Every minute the server checks watchers whose interval has elapsed (one at a time).</li>
             <li>Pointing a watcher at a channel with hundreds of videos is safe: existing videos are remembered and <strong>skipped</strong> — only videos posted after creation upload, oldest first, up to the daily limit.</li>
+            <li>Suspiciously thin polls (throttled/truncated listings) abort the check instead of uploading, and per-video publish dates backstop the creation-date rule.</li>
             <li>Channels: currently-live and upcoming streams are skipped; finished livestreams upload like normal videos. A stream that is still live when checked is retried on later checks.</li>
             <li>Failures after a successful download stay as <strong>failed drafts in Bastyon Uploader → Drafts</strong> where you can retry manually — details appear under the watcher.</li>
             <li>While the vault is <strong>locked</strong> (e.g. after a server restart) checks are paused — unlock it in Bastyon Uploader to resume. Nothing uploads twice.</li>
@@ -276,7 +277,7 @@ export function renderBastyonAuto(username, onNavigate) {
           👤 ${esc(w.accountName || '—')} · 🎞 ${esc(w.quality)} ${esc(w.format)} · 🔁 every ${esc(w.checkIntervalMinutes)} min · 📤 today ${esc(w.uploadsToday)}/${esc(w.dailyLimit)} · 🕒 checked ${esc(timeAgo(w.lastCheckAt))}
         </div>
         <div class="file-meta">
-          📦 ${esc(w.seenCount || 0)} older video${(w.seenCount || 0) === 1 ? '' : 's'} skipped · Watching since ${esc(w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '—')} · 🏷 ${tagsLabel}
+          📦 ${esc(w.seenCount || 0)} older video${(w.seenCount || 0) === 1 ? '' : 's'} skipped · Watching since ${esc(w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '—')} · 🏷 ${tagsLabel}${w.maxEntriesSeen ? ` · saw ${esc(w.lastEntryCount)} videos (usual ~${esc(w.maxEntriesSeen)})` : ''}
         </div>
         ${w.lastError ? `<div class="file-meta" style="color:var(--warning);">⚠️ ${esc(w.lastError.slice(0, 200))}</div>` : ''}
         ${errors}
@@ -354,7 +355,7 @@ export function renderBastyonAuto(username, onNavigate) {
     const isPlaylist = e.target.value === 'playlist';
     document.getElementById('watcher-url-hint').textContent = isPlaylist
       ? 'Playlist: any public playlist URL containing "list=". Only newly added videos upload, each once.'
-      : 'Channel: @handle, /channel/…, /c/… or /user/… URL. Live videos are skipped; finished livestreams are uploaded.';
+      : 'Channel: @handle, /channel/…, /c/… or /user/… URL (bare URLs automatically use the Videos tab for a stable listing). Live videos are skipped; finished livestreams are uploaded.';
     document.getElementById('watcher-mode-hint').innerHTML = isPlaylist ? MODE_HINTS.playlist : MODE_HINTS.channel;
   });
 
