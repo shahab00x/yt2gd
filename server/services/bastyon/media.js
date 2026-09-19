@@ -1,6 +1,14 @@
 /**
  * Media upload module for uploading images and videos to Bastyon proxies and PeerTube servers.
- * Ported 1:1 from bastyon-poster-linux/src/media.py
+ *
+ * Video upload + auth ported from bastyon-poster-linux/src/media.py and hardened
+ * against the pocketnet fork. Image upload follows the OFFICIAL pocketnet.gui
+ * client instead (js/image-uploader.js + js/functions.js):
+ *   1. PeerTube `POST {host}/api/v1/images/upload` ({base64} + Bearer token),
+ *   2. up1 `POST pocketnet.app:8092/up` ({file: raw base64, api_key}) → `/i/{ident}`,
+ * live-probed 2026-09-19: the old `POST bastyon.com:8092/i/` primary matches no
+ * official endpoint (times out) and up1 was 500ing, so failures THROW loudly
+ * instead of degrading to a placeholder.
  */
 
 import { createReadStream, statSync } from 'node:fs';
@@ -104,8 +112,38 @@ function guessMime(filePath) {
   return map[ext] || '';
 }
 
-/** Upload a local image file (PNG/JPEG) to Bastyon media proxies. Returns direct HTTP image URL. */
-export async function uploadImage(filePath, nodeUrl = 'https://1.pocketnet.app:8899') {
+/** Public up1 image key used by the official pocketnet.gui client. */
+export const UP1_API_KEY = 'c61540b5ceecd05092799f936e277552';
+export const UP1_HOSTS = ['https://pocketnet.app:8092/up', 'https://bastyon.com:8092/up'];
+
+/** Strip the `data:<mime>;base64,` prefix — up1 wants raw base64 (official client splits on ','). */
+export function splitRawBase64(b64Data) {
+  const s = String(b64Data || '');
+  const i = s.indexOf(',');
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
+/** Absolutize a PeerTube images/upload URL the way the official client does. */
+export function absolutizeImageUrl(url) {
+  const s = String(url || '');
+  if (!s) return '';
+  return s.indexOf('http://') > -1 ? s : s.startsWith('https://') ? s : `https://${s}`;
+}
+
+/** Extract the up1 ident (`{ data: { ident } }`) and build the public image URL. */
+export function parseUp1Response(data) {
+  const ident = data && data.data && data.data.ident;
+  if (typeof ident !== 'string' || !ident) return '';
+  return `https://bastyon.com:8092/i/${ident}`;
+}
+
+/**
+ * Upload a local image file (PNG/JPEG) for use in Bastyon posts.
+ * Follows the official pocketnet.gui chain: authenticated PeerTube
+ * `images/upload` first (requires `account`), then up1. Returns the direct
+ * HTTP image URL. THROWS when every endpoint fails (never a placeholder).
+ */
+export async function uploadImage(filePath, { account = null, hosts = null } = {}) {
   const { readFileSync } = await import('node:fs');
   if (!requireExists(filePath)) {
     throw new MediaUploadError(`Image file not found: ${filePath}`);
@@ -116,39 +154,50 @@ export async function uploadImage(filePath, nodeUrl = 'https://1.pocketnet.app:8
 
   const fileBytes = readFileSync(filePath);
   const b64Data = `data:${mimeType};base64,` + fileBytes.toString('base64');
+  const failures = [];
 
-  // Primary: Bastyon PeerTube image proxy endpoint
-  const primaryUrl = 'https://bastyon.com:8092/i/';
-  try {
-    const resp = await axios.post(primaryUrl, new URLSearchParams({ image: b64Data, action: 'upload' }), {
-      timeout: 20_000,
-      maxBodyLength: Infinity,
-    });
-    if (resp.status === 200) {
-      const data = resp.data;
-      if (data && typeof data === 'object') {
-        const url = data.url || data.s || data.link;
-        if (url) return url;
+  // Attempt 1: PeerTube images/upload (official first choice, needs a token).
+  if (account) {
+    let candidates = Array.isArray(hosts) && hosts.length ? hosts : null;
+    if (!candidates) {
+      const dynamic = await fetchPeertubeInstances();
+      const probed = dynamic.length ? await probePeertubeHosts(dynamic) : [];
+      candidates = [...probed, ...PEERTUBE_HOSTS].filter((h, i, arr) => arr.indexOf(h) === i);
+    }
+    for (const host of candidates.slice(0, 3)) {
+      const normalizedHost = String(host).replace(/\/+$/, '');
+      try {
+        const token = await getPeertubeToken(account, normalizedHost, 30);
+        const resp = await axios.post(`${normalizedHost}/api/v1/images/upload`, new URLSearchParams({ base64: b64Data }), {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 30_000,
+          maxBodyLength: Infinity,
+        });
+        const url = absolutizeImageUrl(resp.data && resp.data.url);
+        if (resp.status === 200 && url) return url;
+        throw new MediaUploadError(`unexpected response (${resp.status})`);
+      } catch (e) {
+        failures.push(`${normalizedHost} images/upload: ${e.message}`);
       }
     }
-  } catch (e) {
-    // fall through
   }
 
-  // Fallback: Proxy node media upload endpoint
-  const fallbackUrl = `${String(nodeUrl).replace(/\/+$/, '')}/public/image/upload`;
-  try {
-    const resp = await axios.post(fallbackUrl, { base64: b64Data }, { timeout: 20_000, maxBodyLength: Infinity });
-    if (resp.status === 200) {
-      const data = resp.data;
-      if (data && typeof data === 'object' && data.url) return data.url;
+  // Attempt 2: up1 (no auth beyond the public api_key).
+  for (const up1 of UP1_HOSTS) {
+    try {
+      const resp = await axios.post(up1, new URLSearchParams({ file: splitRawBase64(b64Data), api_key: UP1_API_KEY }), {
+        timeout: 30_000,
+        maxBodyLength: Infinity,
+      });
+      const url = parseUp1Response(resp.data);
+      if (resp.status === 200 && url) return url;
+      throw new MediaUploadError(`unexpected response (${resp.status})`);
+    } catch (e) {
+      failures.push(`${up1}: ${e.message}`);
     }
-  } catch (e) {
-    console.warn(`[Bastyon] Image upload failed (${e.message}). Using placeholder image URL.`);
-    return 'https://dummyimage.com/600x400/000/fff&text=Placeholder+Image';
   }
 
-  throw new MediaUploadError('All image upload endpoints failed.');
+  throw new MediaUploadError(`All image upload endpoints failed: ${failures.join('; ')}`);
 }
 
 function requireExists(p) {
@@ -156,12 +205,47 @@ function requireExists(p) {
 }
 
 /** Upload multiple local images sequentially and return their HTTP URLs. */
-export async function uploadImages(filePaths, nodeUrl = 'https://1.pocketnet.app:8899') {
+export async function uploadImages(filePaths, opts = {}) {
   const urls = [];
   for (const path of filePaths) {
-    urls.push(await uploadImage(path, nodeUrl));
+    urls.push(await uploadImage(path, opts));
   }
   return urls;
+}
+
+/**
+ * Set a published video's cover + preview via the official client's
+ * `updateVideo` shape: `PUT {host}/api/v1/videos/{uuid}` formdata with
+ * `thumbnailfile` + `previewfile` (pocketnet.gui/js/peertube.js). The
+ * resumable-init flow drops attached thumbnails, so this runs after every
+ * successful upload that has a thumbnail file. THROWS on failure (callers
+ * decide warn-vs-fail).
+ */
+export async function setVideoThumbnail(host, token, videoUuid, thumbnailPath) {
+  const normalizedHost = String(host).replace(/\/+$/, '');
+  if (!thumbnailPath || !requireExists(thumbnailPath)) {
+    throw new MediaUploadError(`Thumbnail file not found: ${thumbnailPath}`);
+  }
+  const thumbMime = guessMime(thumbnailPath) || 'image/jpeg';
+  const thumbFilename = basename(thumbnailPath);
+  const form = new FormData();
+  // Two separate streams: form-data can only read a stream once.
+  form.append('thumbnailfile', createReadStream(thumbnailPath), { filename: thumbFilename, contentType: thumbMime });
+  form.append('previewfile', createReadStream(thumbnailPath), { filename: thumbFilename, contentType: thumbMime });
+  let resp;
+  try {
+    resp = await axios.put(`${normalizedHost}/api/v1/videos/${videoUuid}`, form, {
+      headers: { Authorization: `Bearer ${token}`, ...form.getHeaders() },
+      timeout: 120_000,
+      maxBodyLength: Infinity,
+    });
+  } catch (e) {
+    throw new MediaUploadError(`Cover update failed: ${e.message}`);
+  }
+  if (resp.status !== 200 && resp.status !== 204) {
+    throw new MediaUploadError(`Cover update failed (${resp.status}): ${JSON.stringify(resp.data).slice(0, 300)}`);
+  }
+  return true;
 }
 
 /**
@@ -471,6 +555,16 @@ export async function uploadToPeertube(filePath, account, host, onProgress = nul
   }
 
   if (vuuid) {
+    // Uniform cover step for BOTH upload paths: the resumable-init flow drops
+    // attached thumbnails, so (re)apply the cover via the update endpoint.
+    // Warn-only — the video itself uploaded fine.
+    if (thumbnailPath && requireExists(thumbnailPath)) {
+      try {
+        await setVideoThumbnail(normalizedHost, token, vuuid, thumbnailPath);
+      } catch (e) {
+        console.warn(`[Bastyon] Video cover update failed on ${normalizedHost} (continuing): ${e.message}`);
+      }
+    }
     return `peertube://${hostDomain}/${vuuid}`;
   }
 

@@ -42,7 +42,7 @@ function notFound(message) {
 }
 
 /**
- * Publish a draft to Bastyon. Resolves with { txid }.
+ * Publish a draft to Bastyon. Resolves with { txid, imageWarning }.
  * State transitions mirror the manual flow: publishing → published, or back
  * to draft (vault locked) / failed (anything else, original file kept).
  */
@@ -155,13 +155,17 @@ export async function publishDraftById(draftId, { abortSignal = null, onEvent = 
       throw new MediaUploadError(`Video upload returned invalid URL: ${peertubeUrl}`);
     }
 
-    // 6. Thumbnail as post image (reuse the already-downloaded file)
+    // 6. Thumbnail as post image (reuse the already-downloaded file).
+    //    Warn-only per policy: the video (with cover) already uploaded, so a
+    //    post-image failure must not fail the publish — but it is surfaced.
+    let imageWarning = '';
     if (thumbPath) {
       try {
-        const imageUrl = await uploadImage(thumbPath);
+        const imageUrl = await uploadImage(thumbPath, { account });
         if (imageUrl) images.push(imageUrl);
       } catch (e) {
-        console.warn('[Bastyon] Thumbnail upload as post image failed (continuing without it):', e.message);
+        imageWarning = `Thumbnail post-image upload failed (video published without it): ${e.message}`;
+        console.warn(`[Bastyon] ${imageWarning}`);
       }
     }
 
@@ -192,8 +196,8 @@ export async function publishDraftById(draftId, { abortSignal = null, onEvent = 
     await cleanupTemp([trimmedPath, transcodedPath, thumbPath, draft.filePath]);
     drafts.updateDraft(draft.id, { status: 'published', txid, error: '', fileSize: 0 });
 
-    emit('done', { draftId: draft.id, success: true, txid });
-    return { txid };
+    emit('done', { draftId: draft.id, success: true, txid, imageWarning: imageWarning || undefined });
+    return { txid, imageWarning };
   } catch (err) {
     console.error('[Bastyon] Publish failed:', err.message);
     // Keep the original downloaded file for retry; discard intermediate artifacts.

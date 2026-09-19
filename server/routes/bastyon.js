@@ -301,12 +301,12 @@ router.post('/drafts/:id/publish', async (req, res) => {
   req.app.locals.bastyonActive[sessionId] = abortController;
 
   try {
-    const { txid } = await publishDraftById(draft.id, {
+    const { txid, imageWarning } = await publishDraftById(draft.id, {
       abortSignal: abortController.signal,
       onEvent: (event, data) => sendBastyonSSE(req, event, data),
     });
     delete req.app.locals.bastyonActive[sessionId];
-    return res.json({ success: true, txid });
+    return res.json({ success: true, txid, imageWarning: imageWarning || undefined });
   } catch (err) {
     delete req.app.locals.bastyonActive[sessionId];
     if (err instanceof vault.VaultLockedError) {

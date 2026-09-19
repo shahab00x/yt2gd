@@ -595,7 +595,8 @@ export function renderBastyon(username, onNavigate) {
     try {
       const res = await api.bastyon.publishDraft(draft.id);
       progressFill.style.width = '100%';
-      showResult('publish-result', `✅ Post published successfully on the Bastyon blockchain!\nTxID: ${res.txid}`, 'success');
+      const warn = res.imageWarning ? `\n⚠️ ${esc(res.imageWarning)}` : '';
+      showResult('publish-result', `✅ Post published successfully on the Bastyon blockchain!\nTxID: ${res.txid}${warn}`, 'success');
       await loadDrafts();
     } catch (e) {
       progressSection.style.display = 'none';

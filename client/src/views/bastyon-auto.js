@@ -336,7 +336,8 @@ export function renderBastyonAuto(username, onNavigate) {
         } else if (r.seeded) {
           alert(`✅ First check complete — remembered ${r.discovered} existing video(s). Only future videos will upload.`);
         } else {
-          alert(`✅ Checked ${r.checked} video(s): ${r.uploaded.length} uploaded, ${r.failed.length} failed${r.skippedOverLimit ? `, ${r.skippedOverLimit} deferred by daily limit` : ''}.`);
+          const imgWarn = (r.uploaded || []).filter((u) => u.imageWarning).length;
+          alert(`✅ Checked ${r.checked} video(s): ${r.uploaded.length} uploaded, ${r.failed.length} failed${r.skippedOverLimit ? `, ${r.skippedOverLimit} deferred by daily limit` : ''}${r.dateSkipped ? `, ${r.dateSkipped} skipped (posted before watcher creation)` : ''}${imgWarn ? ` — ⚠️ ${imgWarn} published without post image (see server log)` : ''}.`);
         }
       } catch (e) { alert(`❌ ${e.message}`); }
       finally {

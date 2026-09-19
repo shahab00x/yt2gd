@@ -447,11 +447,11 @@ export function markSeen(id, videoIds) {
 }
 
 /** Log a successful auto-upload (drives the rolling 24h cap). */
-export function logUpload(id, { videoId, draftId = '', txid = '', title = '' }) {
+export function logUpload(id, { videoId, draftId = '', txid = '', title = '', warning = '' }) {
   const store = loadWatchers();
   const watcher = store.watchers.find((w) => w.id === id);
   if (!watcher) return null;
-  watcher.uploadLog = [...(watcher.uploadLog || []), { videoId, draftId, txid, title, at: Date.now() }].slice(-MAX_LOG_ENTRIES);
+  watcher.uploadLog = [...(watcher.uploadLog || []), { videoId, draftId, txid, title, warning: String(warning || ''), at: Date.now() }].slice(-MAX_LOG_ENTRIES);
   watcher.updatedAt = Date.now();
   saveWatchers(store);
   return watcher;
