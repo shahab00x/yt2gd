@@ -156,8 +156,13 @@ export function renderBastyonAuto(username, onNavigate) {
               <input id="watcher-interval" class="form-control" type="number" min="5" max="1440" value="15" />
             </div>
             <div class="form-group">
-              <label for="watcher-limit">Max uploads per 24h (1–50)</label>
+              <label for="watcher-limit">Max uploads (1–50)</label>
               <input id="watcher-limit" class="form-control" type="number" min="1" max="50" value="5" />
+            </div>
+            <div class="form-group">
+              <label for="watcher-window">Per hours (1–168)</label>
+              <input id="watcher-window" class="form-control" type="number" min="1" max="168" value="24" />
+              <p class="hint" style="margin:4px 0 0;">E.g. 1 per 12 hours ≈ 2 videos/day at even intervals.</p>
             </div>
             <div class="form-group" style="grid-column: 1 / -1;">
               <label for="watcher-tags">Default tags (comma separated)</label>
@@ -165,7 +170,7 @@ export function renderBastyonAuto(username, onNavigate) {
               <p class="hint" style="margin:4px 0 0;">Always added <strong>first</strong>, in addition to the video's own tags. Max 15 tags total per post.</p>
             </div>
           </div>
-          <p class="hint" id="watcher-mode-hint">Channel mode: uploads videos posted <strong>after creation</strong> — the archive is never backfilled. Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original. Videos that can't download yet (e.g. still live) retry automatically.</p>
+          <p class="hint" id="watcher-mode-hint">Channel mode: uploads videos posted <strong>after creation</strong> — the archive is never backfilled. Oldest first, up to the upload quota, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original. Videos that can't download yet (e.g. still live) retry automatically.</p>
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;">
             <button id="watcher-save-btn" class="btn btn-primary">💾 Save Watcher</button>
             <button id="watcher-cancel-btn" class="btn btn-ghost" style="display:none;">Cancel</button>
@@ -178,7 +183,7 @@ export function renderBastyonAuto(username, onNavigate) {
           <div class="card-title">ℹ️ How it works</div>
           <ul style="color:var(--text-secondary); font-size:0.9rem; line-height:1.7; margin:0; padding-left:20px;">
             <li>Every minute the server checks watchers whose interval has elapsed (one at a time).</li>
-            <li>Pointing a watcher at a channel with hundreds of videos is safe: existing videos are remembered and <strong>skipped</strong> — only videos posted after creation upload, oldest first, up to the daily limit.</li>
+            <li>Pointing a watcher at a channel with hundreds of videos is safe: existing videos are remembered and <strong>skipped</strong> — only videos posted after creation upload, oldest first, up to the upload quota (e.g. 1 per 12 hours for ~2 videos/day at even intervals).</li>
             <li>Channel watchers additionally skip anything published before creation (per-video date check). Playlist watchers have no date rule: anything you add uploads.</li>
             <li>Suspiciously thin polls (throttled/truncated listings) abort the check instead of uploading, and per-video publish dates backstop the creation-date rule.</li>
             <li>Channels: currently-live and upcoming streams are skipped; finished livestreams upload like normal videos. A stream that is still live when checked is retried on later checks.</li>
@@ -275,7 +280,7 @@ export function renderBastyonAuto(username, onNavigate) {
           <a href="${esc(w.sourceUrl)}" target="_blank" rel="noopener" style="color:var(--accent-light); word-break:break-all;">${esc(w.sourceUrl)}</a>
         </div>
         <div class="file-meta">
-          👤 ${esc(w.accountName || '—')} · 🎞 ${esc(w.quality)} ${esc(w.format)} · 🔁 every ${esc(w.checkIntervalMinutes)} min · 📤 today ${esc(w.uploadsToday)}/${esc(w.dailyLimit)} · 🕒 checked ${esc(timeAgo(w.lastCheckAt))}
+          👤 ${esc(w.accountName || '—')} · 🎞 ${esc(w.quality)} ${esc(w.format)} · 🔁 every ${esc(w.checkIntervalMinutes)} min · 📤 ${esc(w.uploadsInWindow ?? 0)}/${esc(w.dailyLimit)} per ${esc(w.limitWindowHours ?? 24)}h · 🕒 checked ${esc(timeAgo(w.lastCheckAt))}
         </div>
         <div class="file-meta">
           📦 ${esc(w.seenCount || 0)} older video${(w.seenCount || 0) === 1 ? '' : 's'} skipped · Watching since ${esc(w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '—')} · 🏷 ${tagsLabel}${w.maxEntriesSeen ? ` · saw ${esc(w.lastEntryCount)} videos (usual ~${esc(w.maxEntriesSeen)})` : ''}
@@ -343,7 +348,7 @@ export function renderBastyonAuto(username, onNavigate) {
           alert(`✅ First check complete — remembered ${r.discovered} existing video(s). Only future videos will upload.`);
         } else {
           const imgWarn = (r.uploaded || []).filter((u) => u.imageWarning).length;
-          alert(`✅ Checked ${r.checked} video(s): ${r.uploaded.length} uploaded, ${r.failed.length} failed${r.skippedOverLimit ? `, ${r.skippedOverLimit} deferred by daily limit` : ''}${r.dateSkipped ? `, ${r.dateSkipped} skipped (posted before watcher creation)` : ''}${imgWarn ? ` — ⚠️ ${imgWarn} published without post image (see server log)` : ''}.`);
+          alert(`✅ Checked ${r.checked} video(s): ${r.uploaded.length} uploaded, ${r.failed.length} failed${r.skippedOverLimit ? `, ${r.skippedOverLimit} deferred by upload quota` : ''}${r.dateSkipped ? `, ${r.dateSkipped} skipped (posted before watcher creation)` : ''}${imgWarn ? ` — ⚠️ ${imgWarn} published without post image (see server log)` : ''}.`);
         }
       } catch (e) { alert(`❌ ${e.message}`); }
       finally {
@@ -355,8 +360,8 @@ export function renderBastyonAuto(username, onNavigate) {
 
   // ---------------- Form ----------------
   const MODE_HINTS = {
-    channel: 'Channel mode: uploads videos posted <strong>after creation</strong> — the archive is never backfilled. Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original. Videos that can\'t download yet (e.g. still live) retry automatically.',
-    playlist: 'Playlist mode: uploads <strong>newly added</strong> videos — existing items are remembered and skipped. Any video you add uploads, however old it is (playlists ignore video age). Oldest first, up to the daily limit, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original.',
+    channel: 'Channel mode: uploads videos posted <strong>after creation</strong> — the archive is never backfilled. Oldest first, up to the upload quota, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original. Videos that can\'t download yet (e.g. still live) retry automatically.',
+    playlist: 'Playlist mode: uploads <strong>newly added</strong> videos — existing items are remembered and skipped. Any video you add uploads, however old it is (playlists ignore video age). Oldest first, up to the upload quota, each video once. Uploads keep the title, description, tags, and gain a 🔗 link to the original.',
   };
   document.getElementById('watcher-type').addEventListener('change', (e) => {
     const isPlaylist = e.target.value === 'playlist';
@@ -380,6 +385,7 @@ export function renderBastyonAuto(username, onNavigate) {
       audioLanguage: document.getElementById('watcher-audio').value,
       checkIntervalMinutes: Number(document.getElementById('watcher-interval').value),
       dailyLimit: Number(document.getElementById('watcher-limit').value),
+      limitWindowHours: Number(document.getElementById('watcher-window').value),
       defaultTags: document.getElementById('watcher-tags').value,
     };
   }
@@ -430,6 +436,7 @@ export function renderBastyonAuto(username, onNavigate) {
     document.getElementById('watcher-audio').value = w.audioLanguage || 'original';
     document.getElementById('watcher-interval').value = w.checkIntervalMinutes ?? 15;
     document.getElementById('watcher-limit').value = w.dailyLimit ?? 5;
+    document.getElementById('watcher-window').value = w.limitWindowHours ?? 24;
     document.getElementById('watcher-tags').value = (w.defaultTags || []).join(', ');
     document.getElementById('watcher-cancel-btn').style.display = '';
     document.getElementById('watcher-form-msg').style.display = 'none';
@@ -449,6 +456,7 @@ export function renderBastyonAuto(username, onNavigate) {
     document.getElementById('watcher-audio').value = 'original';
     document.getElementById('watcher-interval').value = 15;
     document.getElementById('watcher-limit').value = 5;
+    document.getElementById('watcher-window').value = 24;
     document.getElementById('watcher-tags').value = '';
     document.getElementById('watcher-cancel-btn').style.display = 'none';
     if (!keepMsg) document.getElementById('watcher-form-msg').style.display = 'none';

@@ -29,6 +29,7 @@ export const WATCHER_DEFAULTS = {
   audioLanguage: 'original',
   checkIntervalMinutes: 15,
   dailyLimit: 5,
+  limitWindowHours: 24,
   enabled: true,
 };
 
@@ -37,6 +38,8 @@ export const WATCHER_LIMITS = {
   intervalMax: 1440, // 24h
   dailyMin: 1,
   dailyMax: 50,
+  windowMin: 1, // hours
+  windowMax: 168, // hours (7 days)
   nameMax: 120,
 };
 
@@ -56,7 +59,7 @@ const MAX_RECENT_ERRORS = 20;
 /** Platform post tag limit — applies to default tags and the merged total. */
 export const MAX_TAGS = 15;
 export const MAX_TAG_LENGTH = 60;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 export class WatcherValidationError extends Error {
   constructor(message) {
@@ -223,6 +226,16 @@ export function validateWatcherInput(data, { partial = false } = {}) {
     out.dailyLimit = n;
   }
 
+  if (input.limitWindowHours !== undefined) {
+    const n = Number(input.limitWindowHours);
+    if (!Number.isInteger(n) || n < WATCHER_LIMITS.windowMin || n > WATCHER_LIMITS.windowMax) {
+      throw new WatcherValidationError(
+        `Upload window must be an integer between ${WATCHER_LIMITS.windowMin} and ${WATCHER_LIMITS.windowMax} hours.`,
+      );
+    }
+    out.limitWindowHours = n;
+  }
+
   if (input.enabled !== undefined) out.enabled = Boolean(input.enabled);
 
   if (input.defaultTags !== undefined) out.defaultTags = normalizeTags(input.defaultTags);
@@ -270,11 +283,12 @@ export function toSummary(w) {
     audioLanguage: w.audioLanguage,
     checkIntervalMinutes: w.checkIntervalMinutes,
     dailyLimit: w.dailyLimit,
+    limitWindowHours: w.limitWindowHours ?? WATCHER_DEFAULTS.limitWindowHours,
     enabled: w.enabled,
     defaultTags: w.defaultTags || [],
     seeded: w.seeded,
     seenCount: (w.seenVideoIds || []).length,
-    uploadsToday: uploadsInLast24h(w),
+    uploadsInWindow: uploadsInWindow(w),
     lastEntryCount: w.lastEntryCount || 0,
     maxEntriesSeen: w.maxEntriesSeen || 0,
     recentErrors: w.recentErrors || [],
@@ -312,6 +326,7 @@ export function createWatcher(data) {
     audioLanguage: clean.audioLanguage || WATCHER_DEFAULTS.audioLanguage,
     checkIntervalMinutes: clean.checkIntervalMinutes ?? WATCHER_DEFAULTS.checkIntervalMinutes,
     dailyLimit: clean.dailyLimit ?? WATCHER_DEFAULTS.dailyLimit,
+    limitWindowHours: clean.limitWindowHours ?? WATCHER_DEFAULTS.limitWindowHours,
     enabled: clean.enabled ?? WATCHER_DEFAULTS.enabled,
     defaultTags: clean.defaultTags || [],
     seeded: false,
@@ -366,14 +381,26 @@ export function deleteWatcher(id) {
   return false;
 }
 
-/** Number of successful uploads in the trailing 24h window. */
-export function uploadsInLast24h(watcher) {
-  const cutoff = Date.now() - DAY_MS;
+/**
+ * Length of a watcher's rolling upload-quota window in ms (default 24h).
+ * Clamped defensively so legacy/corrupt values can't break quota math.
+ */
+export function quotaWindowMs(watcher) {
+  const h = Number(watcher?.limitWindowHours ?? WATCHER_DEFAULTS.limitWindowHours);
+  const hours = Number.isInteger(h)
+    ? Math.min(Math.max(h, WATCHER_LIMITS.windowMin), WATCHER_LIMITS.windowMax)
+    : WATCHER_DEFAULTS.limitWindowHours;
+  return hours * HOUR_MS;
+}
+
+/** Number of successful uploads in the trailing quota window. */
+export function uploadsInWindow(watcher) {
+  const cutoff = Date.now() - quotaWindowMs(watcher);
   return (watcher.uploadLog || []).filter((e) => e && e.at > cutoff).length;
 }
 
 export function remainingQuota(watcher) {
-  return Math.max(0, (watcher.dailyLimit || 0) - uploadsInLast24h(watcher));
+  return Math.max(0, (watcher.dailyLimit || 0) - uploadsInWindow(watcher));
 }
 
 /** Whether a scheduled tick should run this watcher now. */
@@ -453,12 +480,12 @@ export function markSeen(id, videoIds) {
   return watcher;
 }
 
-/** Log a successful auto-upload (drives the rolling 24h cap). */
-export function logUpload(id, { videoId, draftId = '', txid = '', title = '', warning = '' }) {
+/** Log a successful auto-upload (drives the rolling quota window; `at` override is for tests). */
+export function logUpload(id, { videoId, draftId = '', txid = '', title = '', warning = '', at = Date.now() }) {
   const store = loadWatchers();
   const watcher = store.watchers.find((w) => w.id === id);
   if (!watcher) return null;
-  watcher.uploadLog = [...(watcher.uploadLog || []), { videoId, draftId, txid, title, warning: String(warning || ''), at: Date.now() }].slice(-MAX_LOG_ENTRIES);
+  watcher.uploadLog = [...(watcher.uploadLog || []), { videoId, draftId, txid, title, warning: String(warning || ''), at: Number(at) || Date.now() }].slice(-MAX_LOG_ENTRIES);
   watcher.updatedAt = Date.now();
   saveWatchers(store);
   return watcher;

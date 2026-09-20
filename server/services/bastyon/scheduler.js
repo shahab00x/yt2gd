@@ -13,7 +13,8 @@
  *   check instead of driving uploads or marks.
  * - Creation-date rule: candidates published before watcher creation are
  *   skipped (and marked seen) via a per-video upload_date lookup.
- * - Per-watcher rolling 24h cap (`dailyLimit`, default 5).
+ * - Per-watcher rolling quota (`dailyLimit` uploads per `limitWindowHours`
+ *   hours, defaults 5 per 24h).
  * - Oldest-first ordering within a check (by YouTube publish timestamp).
  * - Vault-lock aware: checks are skipped (never crash) while the vault is
  *   locked. Download-phase failures (e.g. a stream that is still live) are
@@ -268,14 +269,15 @@ export async function runWatcherCheck(watcherId, {
     }
     fresh = eligible;
 
-    // 7. Process each new video within the rolling 24h quota.
+    // 7. Process each new video within the rolling quota window.
     const cookiesPath = resolveCookiesPath();
     for (const entry of fresh) {
       const current = watchers.getWatcher(watcherId);
       if (!current) break; // deleted mid-run
-      if (watchers.uploadsInLast24h(current) >= current.dailyLimit) {
+      if (watchers.uploadsInWindow(current) >= current.dailyLimit) {
         result.skippedOverLimit = fresh.length - result.uploaded.length - result.failed.length;
-        console.log(`[Bastyon Auto] Watcher "${current.name}" hit daily limit (${current.dailyLimit}/24h). ${result.skippedOverLimit} video(s) deferred.`);
+        const windowHours = current.limitWindowHours ?? watchers.WATCHER_DEFAULTS.limitWindowHours;
+        console.log(`[Bastyon Auto] Watcher "${current.name}" hit upload quota (${current.dailyLimit}/${windowHours}h). ${result.skippedOverLimit} video(s) deferred.`);
         break;
       }
 
