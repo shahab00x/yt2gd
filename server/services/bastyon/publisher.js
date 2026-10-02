@@ -4,7 +4,7 @@
  * Bastyon Auto-Upload scheduler (server/services/bastyon/scheduler.js).
  *
  * Flow: resolve account + decrypt WIF → fetch thumbnail → trim (optional) →
- * transcode/normalize (optional) → PeerTube upload → post image → UTXOs →
+ * transcode/normalize (optional) → PeerTube upload → UTXOs →
  * build + sign post transaction → broadcast → cleanup + mark published.
  *
  * Progress is reported through `onEvent(event, data)` with the same
@@ -19,7 +19,7 @@ import { Account } from './crypto.js';
 import { buildPayload } from './payload.js';
 import { buildAndSignPostTransaction } from './transaction.js';
 import { BastyonRpcClient } from './rpc.js';
-import { uploadVideo, uploadImage, MediaUploadError } from './media.js';
+import { uploadVideo, MediaUploadError } from './media.js';
 import { trimVideo, isFfmpegAvailable } from './trim.js';
 import { transcodeVideo, probeVideo, needsTranscode, isFfprobeAvailable } from './transcode.js';
 import * as vault from './vault.js';
@@ -42,7 +42,7 @@ function notFound(message) {
 }
 
 /**
- * Publish a draft to Bastyon. Resolves with { txid, imageWarning }.
+ * Publish a draft to Bastyon. Resolves with { txid }.
  * State transitions mirror the manual flow: publishing → published, or back
  * to draft (vault locked) / failed (anything else, original file kept).
  */
@@ -99,7 +99,7 @@ export async function publishDraftById(draftId, { abortSignal = null, onEvent = 
     const account = Account.fromWif(wif);
 
     // 2. Fetch thumbnail (best-effort, non-fatal) BEFORE upload so it can be
-    //    attached to the video in the same request.
+    //    attached to the video as its cover/preview.
     const images = [];
     if (draft.thumbnailUrl) {
       try {
@@ -155,21 +155,7 @@ export async function publishDraftById(draftId, { abortSignal = null, onEvent = 
       throw new MediaUploadError(`Video upload returned invalid URL: ${peertubeUrl}`);
     }
 
-    // 6. Thumbnail as post image (reuse the already-downloaded file).
-    //    Warn-only per policy: the video (with cover) already uploaded, so a
-    //    post-image failure must not fail the publish — but it is surfaced.
-    let imageWarning = '';
-    if (thumbPath) {
-      try {
-        const imageUrl = await uploadImage(thumbPath, { account });
-        if (imageUrl) images.push(imageUrl);
-      } catch (e) {
-        imageWarning = `Thumbnail post-image upload failed (video published without it): ${e.message}`;
-        console.warn(`[Bastyon] ${imageWarning}`);
-      }
-    }
-
-    // 7. UTXOs
+    // 6. UTXOs
     emit('status', { draftId: draft.id, phase: 'broadcast', message: 'Fetching account funds…' });
     const rpc = new BastyonRpcClient();
     const utxos = await rpc.getUtxos(account.address);
@@ -177,7 +163,7 @@ export async function publishDraftById(draftId, { abortSignal = null, onEvent = 
       throw new Error(`No confirmed UTXOs found for address ${account.address}. Ensure the account has a small PKOIN balance.`);
     }
 
-    // 8. Payload + transaction
+    // 6. Payload + transaction
     const payload = buildPayload({
       message: draft.description || draft.title || '',
       caption: draft.title || '',
@@ -188,16 +174,16 @@ export async function publishDraftById(draftId, { abortSignal = null, onEvent = 
     });
     const signedTx = buildAndSignPostTransaction({ account, utxos, payload, txType: 'video' });
 
-    // 9. Broadcast
+    // 7. Broadcast
     emit('status', { draftId: draft.id, phase: 'broadcast', message: 'Broadcasting to the blockchain…' });
     const txid = await rpc.broadcast(signedTx);
 
-    // 10. Success — clean up local files, mark published
+    // 8. Success — clean up local files, mark published
     await cleanupTemp([trimmedPath, transcodedPath, thumbPath, draft.filePath]);
     drafts.updateDraft(draft.id, { status: 'published', txid, error: '', fileSize: 0 });
 
-    emit('done', { draftId: draft.id, success: true, txid, imageWarning: imageWarning || undefined });
-    return { txid, imageWarning };
+    emit('done', { draftId: draft.id, success: true, txid });
+    return { txid };
   } catch (err) {
     console.error('[Bastyon] Publish failed:', err.message);
     // Keep the original downloaded file for retry; discard intermediate artifacts.

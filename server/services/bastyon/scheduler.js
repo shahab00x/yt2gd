@@ -320,10 +320,10 @@ export async function runWatcherCheck(watcherId, {
           error: '',
         });
 
-        const { txid, imageWarning } = await publishVideo(draft.id, { abortSignal: abortController.signal });
-        watchers.logUpload(watcherId, { videoId: entry.videoId, draftId: draft.id, txid, title: meta.title, warning: imageWarning || '' });
-        result.uploaded.push({ videoId: entry.videoId, title: meta.title, draftId: draft.id, txid, imageWarning: imageWarning || undefined });
-        console.log(`[Bastyon Auto] ✅ Published "${meta.title}" (txid ${txid}).${imageWarning ? ` [image warning: ${imageWarning}]` : ''}`);
+        const { txid } = await publishVideo(draft.id, { abortSignal: abortController.signal });
+        watchers.logUpload(watcherId, { videoId: entry.videoId, draftId: draft.id, txid, title: meta.title });
+        result.uploaded.push({ videoId: entry.videoId, title: meta.title, draftId: draft.id, txid });
+        console.log(`[Bastyon Auto] ✅ Published "${meta.title}" (txid ${txid}).`);
         terminal = true;
       } catch (e) {
         console.error(`[Bastyon Auto] ❌ Failed "${entry.title}" (${entry.videoId}):`, e.message);
